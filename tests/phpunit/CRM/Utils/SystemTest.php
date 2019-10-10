@@ -145,6 +145,35 @@ class CRM_Utils_SystemTest extends CiviUnitTestCase {
   }
 
   /**
+   * Test the alterExternUrl hook is used properly by CRM_Mailing_BAO_TrackableURL::getTrackerURL
+   *
+   */
+  public function testAlterExternUrlHookImplementedForGetTrackerURL() {
+
+    // Test requires a valid mailing.
+    $mailing_id = civicrm_api3('Mailing', 'create', ['name' => __FUNCTION__])['id'];
+
+    Civi::service('dispatcher')->addListener('hook_civicrm_alterExternUrl', [$this, 'hook_civicrm_alterExternUrlChange']);
+
+    $externUrl = CRM_Mailing_BAO_TrackableURL::getTrackerURL('https://example.com', $mailing_id, 1);
+    $this->assertContains('thisWas=alteredByHook', $externUrl, "Hook failed to alter URL");
+
+    $externUrl = CRM_Mailing_BAO_TrackableURL::getTrackerURL('https://example.com', $mailing_id, 2);
+    $this->assertContains('thisWas=alteredByHook', $externUrl, "getTrackerURL used incorrect cached version");
+  }
+
+  /**
+   * Hook for alterExternUrl.
+   *
+   * @param \Civi\Core\Event\GenericHookEvent $event
+   * @param string $hookName
+   */
+  public function hook_civicrm_alterExternUrlChange(\Civi\Core\Event\GenericHookEvent $event, $hookName) {
+    // Alter the query.
+    $event->url = $event->url->withPath($event->path . '&thisWas=alteredByHook');
+  }
+
+  /**
    * Hook for alterExternUrl.
    *
    * @param \Civi\Core\Event\GenericHookEvent $event

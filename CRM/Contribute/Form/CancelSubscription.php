@@ -219,7 +219,10 @@ class CRM_Contribute_Form_CancelSubscription extends CRM_Contribute_Form_Contrib
     }
 
     if (CRM_Utils_Array::value('send_cancel_request', $params) == 1) {
-      $cancelParams = ['subscriptionId' => $this->_subscriptionDetails->subscription_id];
+      $cancelParams = [
+        'subscriptionId' => $this->_subscriptionDetails->subscription_id,
+        'recur_id'       => $this->_subscriptionDetails->recur_id,
+      ];
       $cancelSubscription = $this->_paymentProcessorObj->cancelSubscription($message, $cancelParams);
     }
 

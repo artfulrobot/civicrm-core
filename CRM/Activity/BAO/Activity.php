@@ -697,6 +697,9 @@ class CRM_Activity_BAO_Activity extends CRM_Activity_DAO_Activity {
       'case_id',
       'campaign_id',
     ];
+    // Q. What does the code below achieve? case_id and campaign_id are already
+    // in the array, defined above, and this code adds them in again if their
+    // component is enabled? @fixme remove case_id and campaign_id from the array above?
     foreach (['case_id' => 'CiviCase', 'campaign_id' => 'CiviCampaign'] as $attr => $component) {
       if (in_array($component, self::activityComponents())) {
         $activityParams['return'][] = $attr;
@@ -712,15 +715,6 @@ class CRM_Activity_BAO_Activity extends CRM_Activity_DAO_Activity {
     $accessCiviMail = ((CRM_Core_Permission::check('access CiviMail')) ||
       (CRM_Mailing_Info::workflowEnabled() && CRM_Core_Permission::check('create mailings'))
     );
-
-    // @todo - get rid of this & just handle in the array declaration like we do with 'subject' etc.
-    $mappingParams = [
-      'source_record_id' => 'source_record_id',
-      'activity_type_id' => 'activity_type_id',
-      'status_id' => 'status_id',
-      'campaign_id' => 'campaign_id',
-      'case_id' => 'case_id',
-    ];
 
     if (empty($result)) {
       $targetCount = [];
@@ -744,17 +738,25 @@ class CRM_Activity_BAO_Activity extends CRM_Activity_DAO_Activity {
     }
     // Iterate through & do basic mappings & determine which ones we want to retrieve target count for.
     foreach ($result as $id => $activity) {
+
       $activities[$id] = [
-        'activity_id' => $activity['id'],
-        'activity_date_time' => CRM_Utils_Array::value('activity_date_time', $activity),
-        'subject' => CRM_Utils_Array::value('subject', $activity),
-        'assignee_contact_name' => CRM_Utils_Array::value('assignee_contact_sort_name', $activity, []),
-        'source_contact_id' => CRM_Utils_Array::value('source_contact_id', $activity),
-        'source_contact_name' => CRM_Utils_Array::value('source_contact_sort_name', $activity),
+        'activity_id'           => $activity['id'],
+        'activity_type_id'      => $activity['activity_type_id'] ?? NULL,
+        'activity_date_time'    => $activity['activity_date_time'] ?? NULL,
+        'campaign'              => $allCampaigns[$activities[$id]['campaign_id']] ?? NULL,
+        'subject'               => $activity['subject'] ?? NULL,
+        'status_id'             => $activity['status_id'] ?? NULL,
+        'case_id'               => $activity['case_id'] ?? NULL,
+        'assignee_contact_name' => $activity['assignee_contact_sort_name'] ?? [],
+        'source_contact_id'     => $activity['source_contact_id'] ?? NULL,
+        'source_contact_name'   => $activity['source_contact_sort_name'] ?? NULL,
+        'source_record_id'      => $activity['source_record_id'] ?? NULL,
       ];
+
       $activities[$id]['activity_type_name'] = CRM_Core_PseudoConstant::getName('CRM_Activity_BAO_Activity', 'activity_type_id', $activity['activity_type_id']);
       $activities[$id]['activity_type'] = CRM_Core_PseudoConstant::getLabel('CRM_Activity_BAO_Activity', 'activity_type_id', $activity['activity_type_id']);
       $activities[$id]['target_contact_count'] = CRM_Utils_Array::value('target_contact_count', $activity, 0);
+
       if (!empty($activity['target_contact_count'])) {
         $displayedTarget = civicrm_api3('ActivityContact', 'get', [
           'activity_id' => $id,
@@ -772,7 +774,6 @@ class CRM_Activity_BAO_Activity extends CRM_Activity_DAO_Activity {
         }
       }
       if ($activities[$id]['activity_type_name'] === 'Bulk Email') {
-        $bulkActivities[] = $id;
         // Get the total without permissions being passed but only display names after permissioning.
         $activities[$id]['recipients'] = ts('(%1 recipients)', [1 => $activities[$id]['target_contact_count']]);
       }
@@ -780,12 +781,28 @@ class CRM_Activity_BAO_Activity extends CRM_Activity_DAO_Activity {
 
     // Eventually this second iteration should just handle the target contacts. It's a bit muddled at
     // the moment as the bulk activity stuff needs unravelling & test coverage.
+    $caseIds = [];
     foreach ($result as $id => $activity) {
       $isBulkActivity = (!$bulkActivityTypeID || ($bulkActivityTypeID === $activity['activity_type_id']));
-      foreach ($mappingParams as $apiKey => $expectedName) {
-        if (in_array($apiKey, [
-          'target_contact_name',
-        ])) {
+
+      if (!empty($activity['target_contact_name']) && $isBulkActivity) {
+
+        // @todo I stopped here.
+        if ($isBulkActivity) {
+          // @todo  - how is this used? Couldn't we use 'is_bulk' or something clearer?
+          // or the calling function could handle
+          $activities[$id]['mailingId'] = FALSE;
+          if ($accessCiviMail &&
+            ($mailingIDs === TRUE || in_array($activity['source_record_id'], $mailingIDs))
+          ) {
+            $activities[$id]['mailingId'] = TRUE;
+          }
+        }
+      }
+
+      /*
+       This code never ran; apiKey was never target_contact_name!
+        if ($apiKey === 'target_contact_name') {
 
           if ($isBulkActivity) {
             // @todo  - how is this used? Couldn't we use 'is_bulk' or something clearer?
@@ -798,26 +815,14 @@ class CRM_Activity_BAO_Activity extends CRM_Activity_DAO_Activity {
             }
           }
         }
-        // case related fields
-        elseif ($apiKey == 'case_id' && !$isBulkActivity) {
-          $activities[$id][$expectedName] = CRM_Utils_Array::value($apiKey, $activity);
-
-          // fetch case subject for case ID found
-          if (!empty($activity['case_id'])) {
-            $activities[$id]['case_subject'] = civicrm_api3('Case', 'getvalue', [
-              'return' => 'subject',
-              'id' => reset($activity['case_id']),
-            ]);
-          }
-        }
-        else {
-          // @todo this generic assign could just be handled in array declaration earlier.
-          $activities[$id][$expectedName] = CRM_Utils_Array::value($apiKey, $activity);
-          if ($apiKey == 'campaign_id') {
-            $activities[$id]['campaign'] = CRM_Utils_Array::value($activities[$id][$expectedName], $allCampaigns);
-          }
-        }
+       */
+      // fetch case subject for case ID found
+      if (!$isBulkActivity && !empty($activity['case_id'])) {
+        // Store cases; we'll look them up in one query below. We convert
+        // to int here so we can trust it for SQL.
+        $caseIds[$id] = (int) current($activity['case_id']);
       }
+
       // if deleted, wrap in <del>
       if (!empty($activity['source_contact_id']) &&
         CRM_Core_DAO::getFieldValue('CRM_Contact_DAO_Contact', $activity['source_contact_id'], 'is_deleted')
@@ -825,6 +830,15 @@ class CRM_Activity_BAO_Activity extends CRM_Activity_DAO_Activity {
         $activities[$id]['source_contact_name'] = sprintf("<del>%s<del>", $activity['source_contact_name']);
       }
       $activities[$id]['is_recurring_activity'] = CRM_Core_BAO_RecurringEntity::getParentFor($id, 'civicrm_activity');
+    }
+
+    // Look up any case subjects we need in a single query and add them in the relevant activities under 'case_subject'
+    if ($caseIds) {
+      $subjects = CRM_Core_DAO::executeQuery('SELECT id, subject FROM civicrm_case WHERE id IN (' . implode(',', array_unique($caseIds)) . ')')
+        ->fetchMap('id', 'subject');
+      foreach ($caseIds as $activityId => $caseId) {
+        $result[$activityId]['case_subject'] = $subjects[$caseId];
+      }
     }
 
     return $activities;
@@ -2678,7 +2692,7 @@ INNER JOIN  civicrm_option_group grp ON (grp.id = option_group_id AND grp.name =
             'id' => $values['activity_id'],
             'cid' => $params['contact_id'],
             'cxt' => $context,
-            'caseid' => CRM_Utils_Array::value('case_id', $values),
+            'caseid' => isset($values['case_id']) ? current($values['case_id']) : NULL,
           ],
           ts('more'),
           FALSE,

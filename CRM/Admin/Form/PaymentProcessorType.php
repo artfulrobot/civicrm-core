@@ -190,7 +190,13 @@ class CRM_Admin_Form_PaymentProcessorType extends CRM_Admin_Form {
     CRM_Utils_System::flushCache();
 
     if ($this->_action & CRM_Core_Action::DELETE) {
-      CRM_Financial_BAO_PaymentProcessorType::del($this->_id);
+      try {
+        $message = CRM_Financial_BAO_PaymentProcessorType::del($this->_id);
+        CRM_Core_Session::setStatus($message, '', 'success');
+      }
+      catch (\InvalidArgumentException $e) {
+        CRM_Core_Session::setStatus($e->getMessage(), ts('Deletion Error'), 'error');
+      }
       return;
     }
 

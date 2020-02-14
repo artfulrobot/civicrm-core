@@ -112,7 +112,7 @@ class CRM_Financial_BAO_PaymentProcessorTypeTest extends CiviUnitTestCase {
 
     $params = ['id' => $paymentProcessor->id];
     $result = CRM_Financial_BAO_PaymentProcessorType::retrieve($params, $defaults);
-    $this->assertEquals(empty($result), TRUE, 'Verify financial types record deletion.');
+    $this->assertEquals(empty($result), TRUE, 'Verify Payment Processor Type\'s record deletion.');
   }
 
 }

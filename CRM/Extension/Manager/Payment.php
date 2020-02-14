@@ -120,7 +120,23 @@ class CRM_Extension_Manager_Payment extends CRM_Extension_Manager_Base {
     }
 
     $this->_runPaymentHook($info, 'uninstall');
-    return CRM_Financial_BAO_PaymentProcessorType::del($paymentProcessorTypes[$info->key]);
+
+    // We expect the deletion to succeed, but we try-catch it to preserve returning a boolean
+    // just in case that behavior was relied up on.
+    try {
+      $message = CRM_Financial_BAO_PaymentProcessorType::del($paymentProcessorTypes[$info->key]);
+      print "\n\n$message\n\n";
+      return TRUE;
+    }
+    catch (\InvalidArgumentException $e) {
+      // deletion failed. Note that the checks done by CRM_Financial_BAO_PaymentProcessorType::del
+      // are the same as above, so we'll only get an exception here if the uninstall hook created
+      // a payment processor of this type, which seems unlikely!
+
+      // The following is also to preserve previous behavior.
+      CRM_Core_Session::setStatus($e->getMessage(), ts('Deletion Error'), 'error');
+      return FALSE;
+    }
   }
 
   /**

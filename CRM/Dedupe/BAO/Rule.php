@@ -39,34 +39,6 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
    * Return the SQL query for the given rule - either for finding matching
    * pairs of contacts, or for matching against the $params variable (if set).
    *
-   * Example return value:
-   *
-   * SELECT t1.id id1, t2.id id2, 10 weight
-   * FROM civicrm_contact t1
-   * INNER JOIN civicrm_contact t2 ON (t1.household_name = t2.household_name AND t2.contact_type = 'Household')
-   * WHERE t1.household_name IS NOT NULL
-   *   AND t1.household_name <> ''
-   *   AND t1.contact_type = 'Household'
-   *   AND t1.id < t2.id
-   *
-   * Desired:
-   *
-   * 1. Create a query that quickly identifies contacts with duplicates for that field, and returns the first contact and its field value.
-   * 2. Use (1) as a sub query and join on other contacts that match on that field.
-   *
-   * SELECT () id1, () id2, () weight
-   * FROM (
-   *   SELECT MIN(id) id, <value> value
-   *   FROM <table>
-   *   WHERE <value> is valid
-   *     AND (contact type restriction)
-   *  GROUP BY <value>
-   *  HAVING COUNT(*) > 1
-   * ) firstContactThatHasDupes
-   * INNER JOIN <table> t2
-   *   ON t2.<field> = firstContactThatHasDupes.value
-   *      AND t2.contact_id > t1.contact_id AND (t2 contact type restriction)
-   *
    *
    * @return string
    *   SQL query performing the search
@@ -98,6 +70,9 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
     else {
       $valueExpression = "SUBSTR({alias}.$this->rule_field, 1, " . ((int) $this->rule_length) .")";
     }
+    $priValueExpression = str_replace('{alias}', 'pri', $valueExpression);
+    $dupesValueExpression = str_replace('{alias}', 'dupes', $valueExpression);
+    $valsValueExpression = str_replace('{alias}', 'vals_with_dupes', $valueExpression);
 
     // Identify which contact type we're working with.
     $sql = "SELECT contact_type FROM civicrm_dedupe_rule_group WHERE id = {$this->dedupe_rule_group_id};";
@@ -107,16 +82,13 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
       throw new \Exception("Invalid contact type '$contactType'");
     }
 
+    // {{{
     //
     // First generate a query that quickly identifies contacts that have duplicates.
     // Here we're trying to avoid doing a JOIN on big tables because those
     // quickly get out of hand - 10 records joined to themselves is 100
     // comparisons, but 10k records is 100M comparisons.
     //
-
-    // This query calls the rule_table t1
-    // Get an expression for the value we want to compare, for the base table.
-    $val = str_replace('{alias}', 't1', $valueExpression);
 
     // Restrictions that apply to the rule table.
     // In the firstContactThatHasDupes query these are applied in the WHERE
@@ -179,7 +151,7 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
         $match = $substr($match, 0, $this->rule_length);
       }
       $match = CRM_Core_DAO::escape($match, 'String');
-      $primaryWhere[] = "{alias}.$valueExpression = '$match'";
+      $primaryWhere[] = "$priValueExpression = '$match'";
     }
 
     // We need to figure out if the value we're matching on is valid,
@@ -192,29 +164,37 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
       // This will rule out NULL and empty values.
       $primaryWhere[] = "{alias}.$this->rule_field <> ''";
     }
+    // }}}
 
+    // Generate the sub query that is used to identify the values that have matching contacts on.
+    //
     // Glue together the primaryWhere values
-    $primaryWhere = $primaryWhere
+    $subWhere = $primaryWhere
       ? 'WHERE ('
-        . str_replace('{alias}', 't1', implode(') AND (', $primaryWhere))
+        . str_replace('{alias}', 'vals_with_dupes', implode(') AND (', $primaryWhere))
         .  ") \n"
       : '';
 
     // Normally the primary query just exports a contact Id and the value.
     $extraFields = '';
     $extraGroupBys = '';
+    $extraValuesClause = '';
     if ($this->rule_table === 'civicrm_address') {
       // Special case - we need to group and export the location_type_id too.
-      $extraFields = ', t1.location_type_id';
-      $extraGroupBys = ', t1.location_type_id';
+      $extraFields = ', vals_with_dupes.location_type_id';
+      $extraGroupBys = ', vals_with_dupes.location_type_id';
+      $extraValuesClause = 'AND valuesWithDupes.location_type_id = pri.location_type_id';
     }
 
     // Now compile the primary query.
-    $firstContactWithDuplicates =
-        "SELECT MIN($contactIdField) id, $val value $extraFields \n"
-      . "FROM {$this->rule_table} t1 \n"
-      . $primaryWhere
-      . "GROUP BY $val $extraGroupBys HAVING COUNT(*) > 1 ";
+    //
+    // This query calls the rule_table vals_with_dupes
+    // Get an expression for the value we want to compare, for the base table.
+    $valuesWithDuplicates =
+        "SELECT $valsValueExpression value $extraFields \n"
+      . "FROM {$this->rule_table} vals_with_dupes \n"
+      . $subWhere
+      . "GROUP BY $valsValueExpression $extraGroupBys HAVING COUNT(*) > 1 ";
 
     // If we're only working on a subset of possible contacts, apply that
     // now to the inner query.
@@ -225,56 +205,73 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
       }
       $cids = implode(',', $cids);
       // Ensure that at least one of the contactIds is in the subset.
-      $firstContactWithDuplicates .= " AND SUM($contactIdField IN ($cids)) > 0";
+      $valuesWithDuplicates .= " AND SUM($contactIdField IN ($cids)) > 0";
     }
-    // $firstContactWithDuplicates is now complete.
+    // $valuesWithDuplicates is now complete.
+
 
     //
-    // Next we need to join that table onto the 2nd copy of the rule table, t2.
+    // Next we need to join that table onto the 2nd copy of the rule table, dupes.
     //
 
 
     // This query uses the shared restrictions in the ON clause.
-    // Consolidate and replace {alias} with t2
+    // Consolidate and replace {alias} with dupes
     $onRestrictions = $ruleTableRestrictions;
 
     // We also want to restrict the duplicates such that their contact ID is
     // not the original one.
-    // @todo this was avoided for parameterised calls - why? what are those?
-    // Nb. If we're searching a subset of contacts, there's the chance that the
-    // duplicate is found with a lower or higher contact ID, but if not, the duplicate
-    // contact ID will be higher. This might offer a slight performance improvement.
-    $op = empty($cids) ? '>' : '<>';
-    $onRestrictions[] = " (t2.$contactIdField $op first_contact.id) \n";
+    $onRestrictions[] = " (dupes.$contactIdField <> pri.$contactIdField) \n";
 
-    // We need a value expression to identify the data to match on, this time for t2.
-    $val = str_replace('{alias}', 't2', $valueExpression);
-    $onRestrictions[] = "first_contact.value = $val";
+    // We need a value expression to identify the data to match on, this time for dupes.
+    $onRestrictions[] = "$priValueExpression = $dupesValueExpression";
 
     // Special cases:
     if ($this->rule_table === 'civicrm_address') {
       // We need to further restrict the search to the same address location type.
-      $onRestrictions[] = " (first_contact.location_type_id = t2.location_type_id) \n";
+      $onRestrictions[] = " (pri.location_type_id = dupes.location_type_id) \n";
     }
 
-    // Combine to a string, and replace {alias} with 't2'
+    // Combine to a string, and replace {alias} with 'dupes'
     $onRestrictions = '(' . implode(') AND (', $onRestrictions) . ')';
-    $onRestrictions = str_replace('{alias}', 't2', $onRestrictions);
+    $onRestrictions = str_replace('{alias}', 'dupes', $onRestrictions);
 
     // Finally compile the whole query:
-    $sql = "SELECT first_contact.id id1, t2.$contactIdField id2, {$ruleWeightSafe} weight \n"
-      . "FROM ($firstContactWithDuplicates) first_contact \n"
-      . "INNER JOIN {$this->rule_table} t2 \n"
-      . "ON $onRestrictions \n";
+
+    // Now the primary query.
+    //
+    // compile primary restrictions
+    $primaryWhere = $primaryWhere
+      ? '('
+        . str_replace('{alias}', 'pri', implode(') AND (', $primaryWhere))
+        .  ") \n"
+      : '';
+
+    $primary = "SELECT DISTINCT LEAST(pri.$contactIdField, dupes.$contactIdField) id1, GREATEST(pri.$contactIdField, dupes.$contactIdField) id2, $ruleWeightSafe weight "
+      . " FROM {$this->rule_table} pri ";
+    // Join the values query
+    $primary .= "INNER JOIN ($valuesWithDuplicates) valuesWithDupes "
+      . " ON (valuesWithDupes.value = $priValueExpression $extraValuesClause) ";
+
+    // Join the duplicates query
+    $primary .= "INNER JOIN {$this->rule_table} dupes ON $onRestrictions ";
+
+    // Add the WHEREs for the primary query
+    if ($primaryWhere) {
+      $primary .= "WHERE $primaryWhere ";
+    }
+
+    $sql = $primary;
 
     // xxx
-    $d = CRM_Core_DAO::executeQuery($sql);
-    echo "\nQuery: $sql\n";
-    echo "Results:\n";
-    while ($d->fetch()) {
-      print json_encode($d->toArray()) . "\n";
-    }
-    echo "\n";
+  // echo "\nQuery: $sql\n";
+  // $d = CRM_Core_DAO::executeQuery($sql);
+  // echo "Results:\n";
+  // while ($d->fetch()) {
+  //   print json_encode($d->toArray()) . "\n";
+  // }
+  // echo "\n";
+    $sql = "SELECT id1, id2, weight FROM ($sql) t1 ";
 
     return $sql;
   }

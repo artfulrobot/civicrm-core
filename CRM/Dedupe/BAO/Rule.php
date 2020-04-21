@@ -39,6 +39,35 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
    * Return the SQL query for the given rule - either for finding matching
    * pairs of contacts, or for matching against the $params variable (if set).
    *
+   * Example return value:
+   *
+   * SELECT t1.id id1, t2.id id2, 10 weight
+   * FROM civicrm_contact t1
+   * INNER JOIN civicrm_contact t2 ON (t1.household_name = t2.household_name AND t2.contact_type = 'Household')
+   * WHERE t1.household_name IS NOT NULL
+   *   AND t1.household_name <> ''
+   *   AND t1.contact_type = 'Household'
+   *   AND t1.id < t2.id
+   *
+   * Desired:
+   *
+   * 1. Create a query that quickly identifies contacts with duplicates for that field, and returns the first contact and its field value.
+   * 2. Use (1) as a sub query and join on other contacts that match on that field.
+   *
+   * SELECT () id1, () id2, () weight
+   * FROM (
+   *   SELECT MIN(id) id, <value> value
+   *   FROM <table>
+   *   WHERE <value> is valid
+   *     AND (contact type restriction)
+   *  GROUP BY <value>
+   *  HAVING COUNT(*) > 1
+   * ) firstContactThatHasDupes
+   * INNER JOIN <table> t2
+   *   ON t2.<field> = firstContactThatHasDupes.value
+   *      AND t2.contact_id > t1.contact_id AND (t2 contact type restriction)
+   *
+   *
    * @return string
    *   SQL query performing the search
    *
@@ -55,76 +84,75 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
       return NULL;
     }
 
-    // we need to initialise WHERE, ON and USING here, as some table types
-    // extend them; $where is an array of required conditions, $on and
-    // $using are arrays of required field matchings (for substring and
-    // full matches, respectively)
-    $where = [];
-    $on = ["SUBSTR(t1.{$this->rule_field}, 1, {$this->rule_length}) = SUBSTR(t2.{$this->rule_field}, 1, {$this->rule_length})"];
+    $ruleWeightSafe = (int) $this->rule_weight;
+    if ($ruleWeightSafe === 0) {
+      // No point doing this, it amounts to naught.
+      return NULL;
+    }
 
-    $innerJoinClauses = [
-      "t1.{$this->rule_field} IS NOT NULL",
-      "t2.{$this->rule_field} IS NOT NULL",
-      "t1.{$this->rule_field} = t2.{$this->rule_field}",
-    ];
-    if ($this->getFieldType($this->rule_field) === CRM_Utils_Type::T_DATE) {
-      $innerJoinClauses[] = "t1.{$this->rule_field} > '1000-01-01'";
-      $innerJoinClauses[] = "t2.{$this->rule_field} > '1000-01-01'";
+    // Create a template for the expression that extracts the value we want to compare
+    // When we use this we swap out {alias} for the particular one.
+    if (!$this->rule_length) {
+      $valueExpression = "{alias}.{$this->rule_field}";
     }
     else {
-      $innerJoinClauses[] = "t1.{$this->rule_field} <> ''";
-      $innerJoinClauses[] = "t2.{$this->rule_field} <> ''";
+      $valueExpression = "SUBSTR({alias}.$this->rule_field, 1, " . ((int) $this->rule_length) .")";
     }
 
+    // Identify which contact type we're working with.
+    $sql = "SELECT contact_type FROM civicrm_dedupe_rule_group WHERE id = {$this->dedupe_rule_group_id};";
+    $contactType = CRM_Core_DAO::singleValueQuery($sql);
+    // Check this is definitely SQL safe.
+    if (!preg_match('/^(Individual|Organization|Household)$/', $contactType)) {
+      throw new \Exception("Invalid contact type '$contactType'");
+    }
+
+    //
+    // First generate a query that quickly identifies contacts that have duplicates.
+    // Here we're trying to avoid doing a JOIN on big tables because those
+    // quickly get out of hand - 10 records joined to themselves is 100
+    // comparisons, but 10k records is 100M comparisons.
+    //
+
+    // This query calls the rule_table t1
+    // Get an expression for the value we want to compare, for the base table.
+    $val = str_replace('{alias}', 't1', $valueExpression);
+
+    // Restrictions that apply to the rule table.
+    // In the firstContactThatHasDupes query these are applied in the WHERE
+    // but when joining the rule table for the 2nd time, these are applied
+    // in the ON clause.
+    $ruleTableRestrictions = [];
+
+    // Depending on the rule, we discover:
+    // - $contactIdField: an expression that identifeis the contact ID
+    // - $ruleTableRestrictions: further restrictions.
+    //
     switch ($this->rule_table) {
       case 'civicrm_contact':
-        $id = 'id';
-        //we should restrict by contact type in the first step
-        $sql = "SELECT contact_type FROM civicrm_dedupe_rule_group WHERE id = {$this->dedupe_rule_group_id};";
-        $ct = CRM_Core_DAO::singleValueQuery($sql);
-        if ($this->params) {
-          $where[] = "t1.contact_type = '{$ct}'";
-        }
-        else {
-          $where[] = "t1.contact_type = '{$ct}'";
-          $where[] = "t2.contact_type = '{$ct}'";
-        }
+        $contactIdField = 'id';
+        $ruleTableRestrictions[] = "{alias}.contact_type = '$contactType'";
         break;
 
       case 'civicrm_address':
-        $id = 'contact_id';
-        $on[] = 't1.location_type_id = t2.location_type_id';
-        $innerJoinClauses[] = 't1.location_type_id = t2.location_type_id';
-        if (!empty($this->params['civicrm_address']['location_type_id'])) {
-          $locTypeId = CRM_Utils_Type::escape($this->params['civicrm_address']['location_type_id'], 'Integer', FALSE);
-          if ($locTypeId) {
-            $where[] = "t1.location_type_id = $locTypeId";
-          }
-        }
+        $contactIdField = 'contact_id';
         break;
 
       case 'civicrm_email':
       case 'civicrm_im':
       case 'civicrm_openid':
       case 'civicrm_phone':
-        $id = 'contact_id';
+        $contactIdField = 'contact_id';
         break;
 
       case 'civicrm_note':
-        $id = 'entity_id';
-        if ($this->params) {
-          $where[] = "t1.entity_table = 'civicrm_contact'";
-        }
-        else {
-          $where[] = "t1.entity_table = 'civicrm_contact'";
-          $where[] = "t2.entity_table = 'civicrm_contact'";
-        }
+        $contactIdField = 'entity_id';
         break;
 
       default:
         // custom data tables
-        if (preg_match('/^civicrm_value_/', $this->rule_table) || preg_match('/^custom_value_/', $this->rule_table)) {
-          $id = 'entity_id';
+        if (preg_match('/^(civicrm|custom)_value_/', $this->rule_table)) {
+          $contactIdField = 'entity_id';
         }
         else {
           throw new CRM_Core_Exception("Unsupported rule_table for civicrm_dedupe_rule.id of {$this->id}");
@@ -132,65 +160,109 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
         break;
     }
 
-    // build SELECT based on the field names containing contact ids
-    // if there are params provided, id1 should be 0
-    if ($this->params) {
-      $select = "t1.$id id1, {$this->rule_weight} weight";
-      $subSelect = 'id1, weight';
-    }
-    else {
-      $select = "t1.$id id1, t2.$id id2, {$this->rule_weight} weight";
-      $subSelect = 'id1, id2, weight';
+
+    // The primary query's WHERE uses the shared $ruleTableRestrictions
+    // but adds some others too.
+    $primaryWhere = $ruleTableRestrictions;
+
+    // If it's a parametrised search and we have a value in the params, add that as
+    // a restriction now.
+    if (!empty($this->params[$this->rule_table][$this->rule_field])) {
+      $match = $this->params[$this->rule_table][$this->rule_field];
+      if ($this->rule_length) {
+        $substr = function_exists('mb_substr') ? 'mb_substr' : 'substr';
+        $match = $substr($match, 0, $this->rule_length);
+      }
+      $match = CRM_Core_DAO::escape($match, 'String');
+      $primaryWhere[] = "{alias}.$valueExpression = '$match'";
     }
 
-    // build FROM (and WHERE, if it's a parametrised search)
-    // based on whether the rule is about substrings or not
-    if ($this->params) {
-      $from = "{$this->rule_table} t1";
-      $str = 'NULL';
-      if (isset($this->params[$this->rule_table][$this->rule_field])) {
-        $str = CRM_Utils_Type::escape($this->params[$this->rule_table][$this->rule_field], 'String');
-      }
-      if ($this->rule_length) {
-        $where[] = "SUBSTR(t1.{$this->rule_field}, 1, {$this->rule_length}) = SUBSTR('$str', 1, {$this->rule_length})";
-        $where[] = "t1.{$this->rule_field} IS NOT NULL";
-      }
-      else {
-        $where[] = "t1.{$this->rule_field} = '$str'";
-      }
+    // We need to figure out if the value we're matching on is valid,
+    // typically that it is not null, empty, or zero.
+    if ($this->getFieldType($this->rule_field) === CRM_Utils_Type::T_DATE) {
+      // Avoid the 0000-00-00 date
+      $primaryWhere[] = "{alias}.$this->rule_field > 1000101";
     }
     else {
-      if ($this->rule_length) {
-        $from = "{$this->rule_table} t1 JOIN {$this->rule_table} t2 ON (" . implode(' AND ', $on) . ")";
-      }
-      else {
-        $from = "{$this->rule_table} t1 INNER JOIN {$this->rule_table} t2 ON (" . implode(' AND ', $innerJoinClauses) . ")";
-      }
+      // This will rule out NULL and empty values.
+      $primaryWhere[] = "{alias}.$this->rule_field <> ''";
     }
 
-    // finish building WHERE, also limit the results if requested
-    if (!$this->params) {
-      $where[] = "t1.$id < t2.$id";
-    }
-    $query = "SELECT $select FROM $from WHERE " . implode(' AND ', $where);
+    // Glue together the primaryWhere values
+    $primaryWhere = $primaryWhere
+      ? 'WHERE ('
+        . str_replace('{alias}', 't1', implode(') AND (', $primaryWhere))
+        .  ") \n"
+      : '';
+
+    // Now compile the primary query.
+    $firstContactWithDuplicates =
+        "SELECT MIN($contactIdField) id, $val value \n"
+      . "FROM {$this->rule_table} t1 \n"
+      . $primaryWhere
+      . "GROUP BY $val HAVING COUNT(*) > 1 ";
+
+    // If we're only working on a subset of possible contacts, apply that
+    // now to the inner query.
     if ($this->contactIds) {
       $cids = [];
       foreach ($this->contactIds as $cid) {
         $cids[] = CRM_Utils_Type::escape($cid, 'Integer');
       }
-      if (count($cids) == 1) {
-        $query .= " AND (t1.$id = {$cids[0]}) UNION $query AND t2.$id = {$cids[0]}";
+      $cids = implode(',', $cids);
+      // Ensure that at least one of the contactIds is in the subset.
+      $firstContactWithDuplicates .= " AND SUM($contactIdField IN ($cids)) > 0";
+    }
+    // $firstContactWithDuplicates is now complete.
+
+    //
+    // Next we need to join that table onto the 2nd copy of the rule table, t2.
+    //
+
+
+    // This query uses the shared restrictions in the ON clause.
+    // Consolidate and replace {alias} with t2
+    $onRestrictions = $ruleTableRestrictions;
+
+    // We also want to restrict the duplicates such that their contact ID is
+    // not the original one.
+    // @todo this was avoided for parameterised calls - why? what are those?
+    // Nb. If we're searching a subset of contacts, there's the chance that the
+    // duplicate is found with a lower or higher contact ID, but if not, the duplicate
+    // contact ID will be higher. This might offer a slight performance improvement.
+    $op = empty($cids) ? '>' : '<>';
+    $onRestrictions[] = " (t2.$contactIdField $op first_contact.id) \n";
+
+    // We need a value expression to identify the data to match on, this time for t2.
+    $val = str_replace('{alias}', 't2', $valueExpression);
+    $onRestrictions[] = "first_contact.value = $val";
+
+    // Special cases:
+    if ($this->rule_table === 'civicrm_address') {
+      // We need to further restrict the search to the same address location type.
+      $onRestrictions[] = " (first_contact.location_type_id = t2.location_type_id) \n";
+
+      if (!empty($this->params['civicrm_address']['location_type_id'])) {
+        // The parameters specify a particular location type.
+        $locTypeId = CRM_Utils_Type::escape(
+          $this->params['civicrm_address']['location_type_id'], 'Integer', FALSE);
+        if ($locTypeId) {
+          $onRestrictions[] = "(t1.location_type_id = $locTypeId)";
+        }
       }
-      else {
-        $query .= " AND t1.$id IN (" . implode(',', $cids) . ")
-        UNION $query AND  t2.$id IN (" . implode(',', $cids) . ")";
-      }
-      // The `weight` is ambiguous in the context of the union; put the whole
-      // thing in a subquery.
-      $query = "SELECT $subSelect FROM ($query) subunion";
     }
 
-    return $query;
+    // Combine to a string, and replace {alias} with 't2'
+    $onRestrictions = '(' . implode(') AND (', $onRestrictions) . ')';
+    $onRestrictions = str_replace('{alias}', 't2', $onRestrictions);
+
+    // Finally compile the whole query:
+    $sql = "SELECT first_contact.id id1, t2.$contactIdField id2, {$ruleWeightSafe} weight \n"
+      . "FROM ($firstContactWithDuplicates) first_contact \n"
+      . "INNER JOIN {$this->rule_table} t2 \n"
+      . "ON $onRestrictions \n";
+
+    return $sql;
   }
 
   /**

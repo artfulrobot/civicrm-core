@@ -136,6 +136,11 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
 
       case 'civicrm_address':
         $contactIdField = 'contact_id';
+        if (!empty($this->params['civicrm_address']['location_type_id'])) {
+          // The parameters specify a particular location type.
+          $locTypeId = CRM_Utils_Type::escape(
+            $this->params['civicrm_address']['location_type_id'], 'Integer', FALSE);
+        }
         break;
 
       case 'civicrm_email':
@@ -181,7 +186,7 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
     // typically that it is not null, empty, or zero.
     if ($this->getFieldType($this->rule_field) === CRM_Utils_Type::T_DATE) {
       // Avoid the 0000-00-00 date
-      $primaryWhere[] = "{alias}.$this->rule_field > 1000101";
+      $primaryWhere[] = "{alias}.$this->rule_field > '1000-01-01'";
     }
     else {
       // This will rule out NULL and empty values.
@@ -195,12 +200,21 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
         .  ") \n"
       : '';
 
+    // Normally the primary query just exports a contact Id and the value.
+    $extraFields = '';
+    $extraGroupBys = '';
+    if ($this->rule_table === 'civicrm_address') {
+      // Special case - we need to group and export the location_type_id too.
+      $extraFields = ', t1.location_type_id';
+      $extraGroupBys = ', t1.location_type_id';
+    }
+
     // Now compile the primary query.
     $firstContactWithDuplicates =
-        "SELECT MIN($contactIdField) id, $val value \n"
+        "SELECT MIN($contactIdField) id, $val value $extraFields \n"
       . "FROM {$this->rule_table} t1 \n"
       . $primaryWhere
-      . "GROUP BY $val HAVING COUNT(*) > 1 ";
+      . "GROUP BY $val $extraGroupBys HAVING COUNT(*) > 1 ";
 
     // If we're only working on a subset of possible contacts, apply that
     // now to the inner query.
@@ -241,15 +255,6 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
     if ($this->rule_table === 'civicrm_address') {
       // We need to further restrict the search to the same address location type.
       $onRestrictions[] = " (first_contact.location_type_id = t2.location_type_id) \n";
-
-      if (!empty($this->params['civicrm_address']['location_type_id'])) {
-        // The parameters specify a particular location type.
-        $locTypeId = CRM_Utils_Type::escape(
-          $this->params['civicrm_address']['location_type_id'], 'Integer', FALSE);
-        if ($locTypeId) {
-          $onRestrictions[] = "(t1.location_type_id = $locTypeId)";
-        }
-      }
     }
 
     // Combine to a string, and replace {alias} with 't2'
@@ -261,6 +266,15 @@ class CRM_Dedupe_BAO_Rule extends CRM_Dedupe_DAO_Rule {
       . "FROM ($firstContactWithDuplicates) first_contact \n"
       . "INNER JOIN {$this->rule_table} t2 \n"
       . "ON $onRestrictions \n";
+
+    // xxx
+    $d = CRM_Core_DAO::executeQuery($sql);
+    echo "\nQuery: $sql\n";
+    echo "Results:\n";
+    while ($d->fetch()) {
+      print json_encode($d->toArray()) . "\n";
+    }
+    echo "\n";
 
     return $sql;
   }

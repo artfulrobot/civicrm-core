@@ -108,8 +108,10 @@ class CRM_Dedupe_DedupeFinderTest extends CiviUnitTestCase {
         'rule_field' => $field,
       ]);
     }
+
     $foundDupes = CRM_Dedupe_Finder::dupesInGroup($ruleGroup['id'], $this->groupID);
-    $this->assertEquals(count($foundDupes), 4);
+    print_r($foundDupes);
+    $this->assertEquals(4, count($foundDupes));
     CRM_Dedupe_Finder::dupes($ruleGroup['id']);
 
   }
@@ -436,6 +438,8 @@ class CRM_Dedupe_DedupeFinderTest extends CiviUnitTestCase {
     foreach ($params as $param) {
       $contact = $this->callAPISuccess('contact', 'create', $param);
       $this->contactIDs[$count++] = $contact['id'];
+
+      print json_encode(['contactId' => $contact['id']] + $param) . "\n";
 
       $grpParams = [
         'contact_id' => $contact['id'],

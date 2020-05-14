@@ -1903,7 +1903,7 @@ WHERE  id IN ( %1, %2 )
     $allowedOptionTypes = ['String', 'Int', 'Float', 'Money'];
     if ($htmlType != 'Text' && in_array($dataType, $allowedOptionTypes)) {
       //CRM-16659: if option_value then create an option group for this custom field.
-      if ($params['option_type'] == 1 && (empty($params['option_group_id']) || !empty($params['option_value']))) {
+      if (($params['option_type'] ?? 0) == 1 && (empty($params['option_group_id']) || !empty($params['option_value']))) {
         // first create an option group for this custom group
         $optionGroup = new CRM_Core_DAO_OptionGroup();
         $optionGroup->name = "{$params['column_name']}_" . date('YmdHis');

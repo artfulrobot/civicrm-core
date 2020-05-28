@@ -30,6 +30,7 @@ class PropertyBag implements \ArrayAccess {
   protected $props = ['default' => []];
 
   protected static $propMap = [
+    'amount'                      => TRUE,
     'billingStreetAddress'        => TRUE,
     'billingSupplementalAddress1' => TRUE,
     'billingSupplementalAddress2' => TRUE,
@@ -119,6 +120,13 @@ class PropertyBag implements \ArrayAccess {
    */
   public function offsetGet ($offset) {
     $prop = $this->handleLegacyPropNames($offset);
+    if ($prop === NULL) {
+      // They've requested something that we don't have.
+      // This happens a lot with legacy code, and since all array access
+      // calls can be considered legacy, we'll just return NULL.
+      $this->legacyWarning("ArrayAccess used to access '$offset' which had not been set.");
+      return NULL;
+    }
     return $this->get($prop, 'default');
   }
 
@@ -321,6 +329,16 @@ class PropertyBag implements \ArrayAccess {
     return $this;
   }
 
+  /**
+   * Export the props array.
+   *
+   * For legacy/transiation/convenience.
+   *
+   * @return Array
+   */
+  public function toArray($label = 'default') {
+    return $this->props[$label] ?? [];
+  }
   // Public getters, setters.
 
   /**
@@ -385,7 +403,7 @@ class PropertyBag implements \ArrayAccess {
       throw new \InvalidArgumentException("setAmount requires a numeric amount value");
     }
 
-    return $this->set('amount', CRM_Utils_Money::format($value, NULL, NULL, TRUE), $label);
+    return $this->set('amount', $label, \CRM_Utils_Money::format($value, NULL, NULL, TRUE));
   }
 
   /**
@@ -942,6 +960,7 @@ class PropertyBag implements \ArrayAccess {
     }
     return $this->set('recurProcessorID', $label, $input);
   }
+
 
   /**
    * Getter for payment processor generated string for the transaction ID.

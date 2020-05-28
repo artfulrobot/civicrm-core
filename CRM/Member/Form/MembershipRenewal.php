@@ -570,7 +570,7 @@ class CRM_Member_Form_MembershipRenewal extends CRM_Member_Form {
 
       $payment = $this->_paymentProcessor['object'];
       $result = $payment->doPayment($paymentPropertyBag);
-      $this->_params = array_merge($this->_params, $result);
+      $this->_params = array_merge($this->_params, $result->toArray());
 
       $this->_params['contribution_status_id'] = $result['payment_status_id'];
       $this->_params['trxn_id'] = $result['trxn_id'];

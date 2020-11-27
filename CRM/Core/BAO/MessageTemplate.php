@@ -566,9 +566,21 @@ class CRM_Core_BAO_MessageTemplate extends CRM_Core_DAO_MessageTemplate {
       }
     }
     else {
-      // Since we're not relying on Smarty for this function, we DIY.
-      // strip whitespace from ends and turn into a single line
+      // Without Smarty, there's a few things we need to do a different way.
+
+      // Subject: strip whitespace from ends and turn into a single line
       $mailContent['subject'] = trim(preg_replace('/[\r\n]+/', ' ', $mailContent['subject']));
+
+      // Honor template params.
+      if (!empty($params['tplParams'])) {
+        $replacements = [];
+        foreach ($params['tplParams'] as $k => $v) {
+          $replacements['{$' . $k . '}'] = $v;
+        }
+        foreach (['subject', 'html', 'text'] as $_) {
+          $mailContent[$_] = strtr($mailContent[$_], $replacements);
+        }
+      }
     }
 
     // send the template, honouring the target user’s preferences (if any)

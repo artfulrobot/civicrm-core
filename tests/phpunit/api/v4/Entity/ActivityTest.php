@@ -100,4 +100,85 @@ class ActivityTest extends Api4TestBase implements TransactionalInterface {
     $this->assertEquals($expectedActivityContacts, $activityContacts, "ActivityContacts not as expected after update.");
   }
 
+  public function testActivityWithCustomData() {
+
+    // Create custom group, and a field.
+    $groupId = \Civi\Api4\CustomGroup::save(FALSE)
+    ->setMatch(['name'])
+    ->setRecords([
+      [
+        'name' => 'test_custom_group',
+        'title' => 'test_custom_group',
+        'extends' => 'Activity',
+        'collapse_display' => TRUE,
+        'is_multiple' => FALSE,
+        'is_reserved' => FALSE,
+      ]
+    ])
+    ->execute()->first()['id'];
+    $fieldId = \Civi\Api4\CustomField::save(FALSE)
+    ->setMatch(['name'])
+    ->setRecords([
+      [
+        'custom_group_id.name' => 'test_custom_group',
+        'label' => 'test_custom_field',
+        'name' => 'test_custom_field',
+        'html_type' => 'Text',
+        'is_required' => FALSE,
+        'is_searchable' => TRUE,
+        'is_search_range' => FALSE,
+        'is_view' => TRUE,
+        'serialize' => 0,
+      ]
+    ])
+    ->execute()->first()['id'];
+
+    $meetingActivityTypeID = \Civi\Api4\OptionValue::get()
+      ->addSelect('value')
+      ->addWhere('option_group_id:name', '=', 'activity_type')
+      ->addWhere('name', '=', 'Meeting')
+      ->execute()->first()['value'];
+
+    $domainContactID = \CRM_Core_BAO_Domain::getDomain()->contact_id;
+    $c1 = Contact::create(FALSE)->addValue('first_name', '1')->execute()->first()['id'];
+
+    $activityID = Activity::create(FALSE)
+      ->setValues([
+        'target_contact_id'   => [$c1],
+        'activity_type_id'    => $meetingActivityTypeID,
+        'source_contact_id'   => $domainContactID,
+        'subject'             => 'test activity',
+        'test_custom_group.test_custom_field' => 'fidget',
+      ])->execute()->first()['id'];
+
+    // Activity create does not return a full record, so get the ID then do another get call...
+    $activity = Activity::get(FALSE)
+      ->addSelect('id', 'subject', 'activity_type_id', 'test_custom_group.test_custom_field')
+      ->addWhere('id', '=', $activityID)
+      ->execute()->first();
+    $this->assertEquals($meetingActivityTypeID, $activity['activity_type_id']);
+    $this->assertEquals('test activity', $activity['subject']);
+
+
+    // Check the custom data.
+    $this->assertEquals('fidget', $activity['test_custom_group.test_custom_field']);
+
+    // Now try the update action.
+    $activityID = Activity::update(FALSE)
+      ->addWhere('id', '=', $activityID)
+      ->setValues([
+        'test_custom_group.test_custom_field' => 'wonkler',
+      ])->execute()->first()['id'];
+    $activity = Activity::get(FALSE)
+      ->addSelect('id', 'subject', 'activity_type_id', 'test_custom_group.test_custom_field')
+      ->addWhere('id', '=', $activityID)
+      ->execute()->first();
+
+    // Check the custom data.
+    $this->assertEquals('wonkler', $activity['test_custom_group.test_custom_field']);
+
+    \Civi\Api4\CustomField::delete(FALSE)->addWhere('id', '=', $fieldId)->execute();
+    \Civi\Api4\CustomGroup::delete(FALSE)->addWhere('id', '=', $groupId)->execute();
+  }
+
 }

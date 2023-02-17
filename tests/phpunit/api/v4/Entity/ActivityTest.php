@@ -50,7 +50,8 @@ class ActivityTest extends Api4TestBase implements TransactionalInterface {
       ->setValues([
         'target_contact_id'   => [$c1],
         'assignee_contact_id' => [$c2],
-        'activity_type_id'    => $meetingActivityTypeID,
+        'activity_type_id:name' => 'Meeting',
+        'status_id:name' => 'Completed',
         'source_contact_id'   => $domainContactID,
         'subject'             => 'test activity',
       ])->execute()->first()['id'];
@@ -113,6 +114,8 @@ class ActivityTest extends Api4TestBase implements TransactionalInterface {
         'collapse_display' => TRUE,
         'is_multiple' => FALSE,
         'is_reserved' => FALSE,
+        'is_public' => FALSE,
+        'is_reserved' => FALSE,
       ]
     ])
     ->execute()->first()['id'];
@@ -124,9 +127,11 @@ class ActivityTest extends Api4TestBase implements TransactionalInterface {
         'label' => 'test_custom_field',
         'name' => 'test_custom_field',
         'html_type' => 'Text',
+        'data_type' => 'String',
         'is_required' => FALSE,
         'is_searchable' => TRUE,
         'is_search_range' => FALSE,
+        'is_active' => TRUE,
         'is_view' => TRUE,
         'serialize' => 0,
       ]
@@ -144,11 +149,14 @@ class ActivityTest extends Api4TestBase implements TransactionalInterface {
 
     $activityID = Activity::create(FALSE)
       ->setValues([
-        'target_contact_id'   => [$c1],
-        'activity_type_id'    => $meetingActivityTypeID,
+        'activity_type_id:name' => 'Meeting',
+        'status_id:name' => 'Completed',
+        'target_contact_id'   => $c1,
+        // 'activity_type_id'    => $meetingActivityTypeID,
         'source_contact_id'   => $domainContactID,
         'subject'             => 'test activity',
         'test_custom_group.test_custom_field' => 'fidget',
+        'details' => '',
       ])->execute()->first()['id'];
 
     // Activity create does not return a full record, so get the ID then do another get call...

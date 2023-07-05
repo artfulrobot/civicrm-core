@@ -293,7 +293,7 @@ class Security {
    * @return array
    */
   public function getCMSPermissionsUrlParams() {
-    return ['ufAccessURL' => '/fixme/standalone/permissions/url/params'];
+    return ['ufAccessURL' => '/civicrm/admin/roles'];
   }
 
   /**

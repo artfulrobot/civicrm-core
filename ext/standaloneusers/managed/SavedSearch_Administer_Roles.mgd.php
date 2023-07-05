@@ -85,6 +85,11 @@ return [
             'table',
             'table-striped',
           ],
+          'addButton' => [
+            'path' => 'civicrm/admin/role',
+            'text' => E::ts('Add Role'),
+            'icon' => 'fa-plus',
+          ],
         ],
         'acl_bypass' => FALSE,
       ],

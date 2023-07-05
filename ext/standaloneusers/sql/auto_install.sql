@@ -63,7 +63,7 @@ CREATE TABLE `civicrm_user` (
   `when_updated` timestamp NULL,
   `is_active` tinyint NOT NULL DEFAULT 1,
   `timezone` varchar(32) NULL COMMENT 'User\'s timezone',
-  `language` int unsigned COMMENT 'The language for the user.',
+  `language` varchar(5) COMMENT 'The language for the user e.g. fr_CA',
   PRIMARY KEY (`id`),
   UNIQUE INDEX `UI_username`(username),
   CONSTRAINT FK_civicrm_user_contact_id FOREIGN KEY (`contact_id`) REFERENCES `civicrm_contact`(`id`) ON DELETE CASCADE

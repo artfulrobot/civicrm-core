@@ -525,7 +525,16 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
    * @inheritDoc
    */
   public function getTimeZoneString() {
-    $timezone = date_default_timezone_get();
+    global $loggedInUser;
+
+    // Note that 0 is a valid timezone (GMT) so we use strlen not empty to check.
+    if (!empty($loggedInUser) && isset($loggedInUser['timezone']) && strlen($loggedInUser['timezone'])) {
+      $timezone = $loggedInUser['timezone'];
+    }
+    else {
+      $timezone = parent::getTimeZoneString();
+    }
+
     return $timezone;
   }
 

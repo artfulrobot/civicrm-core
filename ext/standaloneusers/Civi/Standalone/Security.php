@@ -283,6 +283,7 @@ class Security {
    */
   public function languageNegotiationURL($url, $addLanguagePart = TRUE, $removeLanguagePart = FALSE) {
     // @todo
+    // Note: the user's language (e.g. fr_CA is stored on the User entity, i.e. global loggedInUser['language'])
     return $url;
   }
 

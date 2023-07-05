@@ -135,15 +135,17 @@
 
   <field>
     <name>language</name>
-    <type>int unsigned</type>
+    <type>varchar</type>
+    <length>5</length>
     <title>Language</title>
     <pseudoconstant>
       <optionGroupName>languages</optionGroupName>
+      <keyColumn>name</keyColumn>
     </pseudoconstant>
     <html>
       <type>Select</type>
     </html>
-    <comment>The language for the user.</comment>
+    <comment>The language for the user e.g. fr_CA</comment>
   </field>
 
 </table>

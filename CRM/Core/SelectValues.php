@@ -1221,11 +1221,15 @@ class CRM_Core_SelectValues {
     $perms = $options = [];
     \CRM_Utils_Hook::permissionList($perms);
 
+    $inact = [];
     foreach ($perms as $machineName => $details) {
       if ($details['is_active']) {
         $options[$machineName] = $details['title'];
       }
     }
+    // Expose these two special ones.
+    $options['cms:administer users']  = $perms['cms:administer users']['title'];
+    $options['cms:view user account'] = $perms['cms:view user account']['title'];
     return $options;
   }
 

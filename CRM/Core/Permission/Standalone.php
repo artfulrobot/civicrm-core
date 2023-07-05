@@ -67,24 +67,26 @@ class CRM_Core_Permission_Standalone extends CRM_Core_Permission_Base {
    * @inheritdoc
    */
   public function upgradePermissions($permissions) {
-    // Standalone does not store a list of permissions, so we don't need to
-    // do anything with new permissions. But if any of our users have a
-    // permission that no longer exists, we need to remove that now.
-    $roles = \Civi\Api4\Role::get(FALSE)
-    ->execute();
-    $validPermissions = array_keys($permissions);
-    $records = [];
-    $rolesAffected = [];
-    foreach ($roles as $role) {
-      $newPermissions = array_intersect($role['permissions'], $validPermissions);
-      if ($newPermissions !== $role['permissions']) {
-        $records[] = ['id' => $role['id'], 'permissions' => $newPermissions];
-        $rolesAffected[] = $role['name'];
+
+    if (class_exists(\Civi\Standalone\Security::class)) {
+      // Standalone does not store a list of permissions, so we don't need to
+      // do anything with new permissions. But if any of our users have a
+      // permission that no longer exists, we need to remove that now.
+      $roles = \Civi\Api4\Role::get(FALSE)->execute();
+      $validPermissions = array_keys($permissions);
+      $records = [];
+      $rolesAffected = [];
+      foreach ($roles as $role) {
+        $newPermissions = array_intersect($role['permissions'], $validPermissions);
+        if ($newPermissions !== $role['permissions']) {
+          $records[] = ['id' => $role['id'], 'permissions' => $newPermissions];
+          $rolesAffected[] = $role['name'];
+        }
       }
-    }
-    if ($records) {
-      \Civi\Api4\Role::save(FALSE)->setRecords($records)->execute();
-      \Civi::log()->info("Removed old permissions from roles: " . implode(', ', $rolesAffected));
+      if ($records) {
+        \Civi\Api4\Role::save(FALSE)->setRecords($records)->execute();
+        \Civi::log()->info("Removed old permissions from roles: " . implode(', ', $rolesAffected));
+      }
     }
   }
 

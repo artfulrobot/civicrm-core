@@ -560,7 +560,7 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
    */
   public function getCMSPermissionsUrlParams() {
     if ($this->missingStandaloneExtension()) {
-      return ['ufAccessURL' => '/fixme/standalone/permissions/url/params'];
+      return ['ufAccessURL' => '/civicrm'];
     }
     return Security::singleton()->getCMSPermissionsUrlParams();
   }
@@ -569,6 +569,28 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
     http_response_code(403);
     echo "403 Forbidden: You do not have permission to access this resource.\n";
     // TODO: Prettier error page
+  }
+
+  /**
+   * @inheritDoc
+   */
+  public function checkPermissionAddUser() {
+    return CRM_Core_Permission::check('cms:administer users');
+  }
+
+  /**
+   * @inheritDoc
+   */
+  public function getUserRecordUrl($contactID) {
+    $uid = CRM_Core_BAO_UFMatch::getUFId($contactID);
+    if (CRM_Core_Session::singleton()
+      ->get('userID') == $contactID || CRM_Core_Permission::checkAnyPerm([
+        'cms:administer users',
+        'cms:view user account',
+      ])
+    ) {
+      return $this->url('civicrm/admin/user#?User1=' . $uid);
+    };
   }
 
 }

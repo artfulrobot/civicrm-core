@@ -1,23 +1,23 @@
 {
     "type": "search",
-    "title": "User Roles",
-    "description": "List of roles defined on the system.",
-    "icon": "fa-graduation-cap",
-    "server_route": "civicrm/admin/roles",
-    "permission": "cms:administer users",
-    "navigation": {
-        "parent": "Administer",
-        "label": "User Roles",
-        "weight": 0
-    },
     "requires": [],
+    "entity_type": null,
+    "join_entity": null,
+    "title": "Administer User Roles",
+    "description": "List of roles defined on the system.",
     "is_dashlet": false,
     "is_public": false,
     "is_token": false,
-    "entity_type": null,
-    "join_entity": null,
     "contact_summary": null,
     "summary_contact_type": null,
+    "icon": "fa-graduation-cap",
+    "server_route": "civicrm/admin/roles",
+    "permission": "cms:administer users",
     "redirect": null,
-    "create_submission": null
+    "create_submission": false,
+    "navigation": {
+        "parent": "Users and Permissions",
+        "label": "Roles",
+        "weight": 1
+    }
 }

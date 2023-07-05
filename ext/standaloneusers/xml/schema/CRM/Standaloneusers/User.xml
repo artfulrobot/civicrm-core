@@ -60,6 +60,7 @@
     <name>password</name>
     <type>varchar</type>
     <required>true</required>
+    <default>""</default>
     <length>128</length>
     <comment>Hashed password</comment>
   </field>

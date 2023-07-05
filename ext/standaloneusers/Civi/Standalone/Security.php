@@ -161,7 +161,7 @@ class Security {
   public function createUser(&$params, $mail) {
     try {
       // Q. should this be in the api for User.create?
-      $hashedPassword = $this->_password_crypt(static::$hashMethod, $params['cms_pass'], $this->_password_generate_salt());
+      $hashedPassword = $this->hashPassword($params['cms_pass']);
 
       $userID = \Civi\Api4\User::create(FALSE)
         ->addValue('username', $params['cms_name'])
@@ -180,6 +180,17 @@ class Security {
     // CRM_Core_Config::singleton()->inCiviCRM = FALSE;
 
     return (int) $userID;
+  }
+
+  /**
+   * Create a hashed password value for given plaintext version.
+   */
+  public function hashPassword(string $plaintextPassword): string {
+    if (!$plaintextPassword) {
+      throw new \InvalidArgumentException("hashPassword refuses to create a hash from an empty password!");
+    }
+    $hashedPassword = $this->_password_crypt(static::$hashMethod, $plaintextPassword, $this->_password_generate_salt());
+    return $hashedPassword;
   }
 
   /**

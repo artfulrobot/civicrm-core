@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types = 1);
+use Civi\Api4\Participant;
 use Civi\Test\FormTrait;
 
 /**
@@ -26,8 +28,10 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
    */
   public function testSubmit(): void {
     $this->submitPaidEvent();
-    $this->assertSentMailHasStrings([
-      'Dear Kim,  Thank you for your registration.  This is a confirmation that your registration has been received and your status has been updated to Registered.',
+    $this->assertMailSentContainingStrings([
+      'Dear Kim,',
+      'Thank you for your registration.',
+      'This is a confirmation that your registration has been received and your status has been updated to Registered.',
       'Friday September 16th, 2022 12:00 PM-Saturday September 17th, 2022 12:00 PM',
       'Add event to Google Calendar',
     ]);
@@ -48,7 +52,7 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
    */
   public function testNoCalendarLinks() : void {
     $this->submitPaidEvent(['is_show_calendar_links' => FALSE]);
-    $this->assertSentMailNotHasStrings([
+    $this->assertMailSentNotContainingStrings([
       'Download iCalendar entry for this event',
       'Add event to Google Calendar',
       'civicrm/event/ical',
@@ -76,7 +80,6 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
    */
   public function testPaidSubmit(string $thousandSeparator): void {
     $this->setCurrencySeparators($thousandSeparator);
-    $mut = new CiviMailUtils($this);
     $paymentProcessorID = $this->processorCreate();
     /** @var \CRM_Core_Payment_Dummy $processor */
     $processor = Civi\Payment\System::singleton()->getById($paymentProcessorID);
@@ -157,15 +160,14 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
       'financial_trxn_id' => $financialTrxn['id'] + 1,
       'amount' => '1.67',
     ], $entityFinancialTrxns[2], ['id', 'entity_id']);
-    $mut->checkMailLog([
+    $this->assertMailSentContainingHeaderString('Registration Confirmation - Annual CiviCRM meet');
+    $this->assertMailSentContainingStrings([
       'Event Information and Location',
-      'Registration Confirmation - Annual CiviCRM meet',
       'Expires: January ' . (date('Y') + 1),
       'Visa',
       '************1111',
       'This is a confirmation that your registration has been received and your status has been updated to<strong> Registered</strong>',
     ]);
-    $mut->clearMessages();
   }
 
   /**
@@ -228,11 +230,11 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
    * @throws \CRM_Core_Exception
    */
   public function testTaxMultipleParticipant(): void {
-    $this->swapMessageTemplateForTestTemplate('event_online_receipt', 'text');
     $this->createLoggedInUser();
     $this->createScenarioMultipleParticipantPendingWithTax();
-
-    $participants = $this->callAPISuccess('Participant', 'get', [])['values'];
+    $participants = Participant::get()
+      ->addWhere('event_id', '=', $this->getEventID())
+      ->addSelect('contact_id', 'contact_id.job_title')->execute();
     $this->assertCount(3, $participants);
     $contribution = $this->callAPISuccessGetSingle(
       'Contribution',
@@ -245,8 +247,25 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
     $this->assertEquals(660, $contribution['total_amount'], 'Invalid Tax amount.');
     $mailSent = $this->sentMail;
     $this->assertCount(3, $mailSent, 'Three mails should have been sent to the 3 participants.');
-    $this->assertStringContainsString('contactID:::' . $contribution['contact_id'], $mailSent[0]['body']);
-    $this->assertStringContainsString('contactID:::' . ($contribution['contact_id'] + 1), $mailSent[1]['body']);
+
+    // The first one is the primary & has the job titles for all 3.
+    $this->assertStringContainsString('Dear Participant1', $mailSent[0]['body']);
+    $this->assertStringContainsString('job_title	oracle', $mailSent[0]['body']);
+    $this->assertStringContainsString('job_title	wizard', $mailSent[0]['body']);
+    $this->assertStringContainsString('job_title	seer', $mailSent[0]['body']);
+
+    // The second has only it's own job title.
+    $this->assertStringContainsString('Dear Participant2', $mailSent[1]['body']);
+    $this->assertStringNotContainsString('job_title	oracle', $mailSent[1]['body']);
+    $this->assertStringContainsString('job_title	wizard', $mailSent[1]['body']);
+    $this->assertStringNotContainsString('job_title	seer', $mailSent[1]['body']);
+
+    // The third has only it's own job title.
+    $this->assertStringContainsString('Dear Participant3', $mailSent[2]['body']);
+    $this->assertStringNotContainsString('job_title	oracle', $mailSent[2]['body']);
+    $this->assertStringNotContainsString('job_title	wizard', $mailSent[2]['body']);
+    $this->assertStringContainsString('job_title	seer', $mailSent[2]['body']);
+
     $mut = new CiviMailUtils($this);
     $this->validateAllContributions();
     $this->validateAllPayments();
@@ -254,12 +273,22 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
     $mailSent = $mut->getAllMessages();
     $this->assertCount(3, $mailSent);
 
-    $this->assertStringContainsString('participant_status:::Registered', $mailSent[0]);
-    $this->assertStringContainsString('Dear Participant2', $mailSent[0]);
+    $this->assertStringContainsString('Registered', $mailSent[0]);
 
-    $this->assertStringContainsString('contactID:::' . ($contribution['contact_id'] + 1), $mailSent[0]);
-    $this->assertStringContainsString('contactID:::' . ($contribution['contact_id'] + 2), $mailSent[1]);
-    $this->assertStringContainsString('contactID:::' . $contribution['contact_id'], $mailSent[2]);
+    $this->assertStringContainsString('Dear Participant1', $mailSent[2]);
+    $this->assertStringContainsString('job_title	oracle', $mailSent[2]);
+    // Note the delayed version does not add the additional participant profiles
+    // This could be fixed at some point so no assertions added.
+
+    $this->assertStringContainsString('Dear Participant2', $mailSent[0]);
+    $this->assertStringNotContainsString('job_title	oracle', $mailSent[0]);
+    $this->assertStringContainsString('job_title	wizard', $mailSent[0]);
+    $this->assertStringNotContainsString('job_title	seer', $mailSent[0]);
+
+    $this->assertStringContainsString('Dear Participant3', $mailSent[1]);
+    $this->assertStringNotContainsString('job_title	oracle', $mailSent[1]);
+    $this->assertStringNotContainsString('job_title	wizard', $mailSent[1]);
+    $this->assertStringContainsString('job_title	seer', $mailSent[1]);
   }
 
   /**
@@ -292,7 +321,7 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
   /**
    * Test online registration for event with no price options selected as per CRM-19964.
    */
-  public function testOnlineRegNoPrice(): void {
+  public function testOnlineRegistrationNoPrice(): void {
     $this->processorCreate(['is_default' => TRUE, 'user_name' => 'Test', 'is_test' => FALSE]);
     $paymentProcessorID = $this->processorCreate(['is_default' => TRUE, 'user_name' => 'Test', 'is_test' => TRUE]);
     $params = [
@@ -321,26 +350,13 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
     // Create online event registration.
     $this->submitForm(
       $event['id'], [
-        [
-          'first_name' => 'Bruce',
-          'last_name' => 'Wayne',
-          'email-Primary' => 'bruce@gotham.com',
-          'price_' . $priceField['id'] => '',
-          'priceSetId' => $priceField['values'][$priceField['id']]['price_set_id'],
-          'payment_processor_id' => $paymentProcessorID,
-          'amount' => 0,
-          'amount_level' => '',
-          'bypass_payment' => '',
-          'is_primary' => 1,
-          'is_pay_later' => 0,
-          'campaign_id' => NULL,
-          'defaultRole' => 1,
-          'participant_role_id' => '1',
-          'tax_amount' => NULL,
-          'ip_address' => '127.0.0.1',
-          'invoiceID' => '57adc34957a29171948e8643ce906332',
-          'button' => '_qf_Register_upload',
-        ],
+        'first_name' => 'Bruce',
+        'last_name' => 'Wayne',
+        'email-Primary' => 'bruce@gotham.com',
+        'price_' . $priceField['id'] => '',
+        'priceSetId' => $priceField['values'][$priceField['id']]['price_set_id'],
+        'payment_processor_id' => $paymentProcessorID,
+        'button' => '_qf_Register_upload',
       ]
     );
     $contribution = $this->callAPISuccess('Contribution', 'get', ['invoice_id' => '57adc34957a29171948e8643ce906332']);
@@ -378,58 +394,26 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
   }
 
   /**
-   * Submit (unpaid) event registration with a note field
-   *
-   * @param array $event
-   * @param int|null $contact_id
-   *
-   * @return array
-   */
-  private function submitWithNote(array $event, ?int $contact_id): array {
-    if ($contact_id === NULL) {
-      $contact_id = $this->createLoggedInUser();
-    }
-    $mut = new CiviMailUtils($this, TRUE);
-    $this->submitForm($event['id'], [
-      [
-        'email-Primary' => 'demo@example.com',
-        'note' => $event['note'],
-      ],
-    ]);
-    $participant = $this->callAPISuccessGetSingle('Participant', []);
-    $mut->checkMailLog(['Comment: ' . $event['note'] . chr(0x0A)]);
-    $mut->stop();
-    $mut->clearMessages();
-    //return ['contact_id' => $contact_id, 'participant_id' => $participant['id']];
-    return [$contact_id, $participant['id']];
-  }
-
-  /**
    * Create an event with a "pre" profile
    *
    * @throws \CRM_Core_Exception
    */
-  private function creatEventWithProfile($event): array {
-    if (empty($event)) {
-      $event = $this->eventCreateUnpaid();
-      $this->createJoinedProfile(['entity_table' => 'civicrm_event', 'entity_id' => $event['id']]);
-      $this->addUFField($this->ids['UFGroup']['our profile'], 'note', 'Contact', 'Comment');
+  private function submitEventWithNoteInProfile($note): void {
+    if (empty($this->ids['Event'])) {
+      $this->eventCreateUnpaid();
+      $this->addUFField($this->ids['UFGroup']['event_post_post_event'], 'note', 'Contact', 'Comment');
     }
 
-    $_REQUEST['id'] = $event['id'];
-    /** @var \CRM_Event_Form_Registration_Confirm $form */
-    $form = $this->getFormObject('CRM_Event_Form_Registration_Confirm');
-    $form->preProcess();
-
-    CRM_Event_Form_Registration_Confirm::assignProfiles($form);
-
-    $smarty = CRM_Core_Smarty::singleton();
-    $tplVar = $smarty->getTemplateVars();
-    $this->assertEquals([
-      'CustomPre' => ['First Name' => NULL, 'Comment' => NULL],
-      'CustomPreGroupTitle' => 'Public title',
-    ], $tplVar['primaryParticipantProfile']);
-    return $event;
+    $form = $this->getFormWrapper([
+      'email-Primary' => 'demo@example.com',
+      'note' => $note,
+      'job_title' => 'Magician',
+    ], $this->getEventID());
+    $form->processForm();
+    $form->checkTemplateVariable('primaryParticipantProfile', [
+      'CustomPre' => ['Comment' => $note, 'job_title' => 'Magician'],
+      'CustomPreGroupTitle' => 'Public Event Post Post Profile',
+    ]);
   }
 
   /**
@@ -467,26 +451,24 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
    */
   public function testNoteSubmission(): void {
     // Create an event with an attached profile containing a note
-    $event = $this->creatEventWithProfile(NULL);
-    $event['custom_pre_id'] = $this->ids['UFGroup']['our profile'];
-    $event['note'] = 'This is note 1';
-    [$contact_id, $participant_id] = $this->submitWithNote($event, NULL);
-
-    civicrm_api3('Participant', 'delete', ['id' => $participant_id]);
+    $this->submitEventWithNoteInProfile('This is note 1');
+    $participant = $this->callAPISuccessGetSingle('Participant', []);
+    $this->assertMailSentContainingStrings(['Comment', 'This is note 1']);
+    $this->callAPISuccess('Participant', 'delete', ['id' => $participant['id']]);
 
     //now that the contact has one note, register this contact again with a different note
     //and confirm that the note shown in the email is the current one
-    $event = $this->creatEventWithProfile($event);
-    $event['custom_pre_id'] = $this->ids['UFGroup']['our profile'];
-    $event['note'] = 'This is note 2';
-    [$contact_id, $participant_id] = $this->submitWithNote($event, $contact_id);
-    civicrm_api3('Participant', 'delete', ['id' => $participant_id]);
+    // Create an event with an attached profile containing a note
+    $this->submitEventWithNoteInProfile('This is note 2');
+    $participant = $this->callAPISuccessGetSingle('Participant', []);
+    $this->assertMailSentContainingStrings(['Comment', 'This is note 2']);
+    $this->callAPISuccess('Participant', 'delete', ['id' => $participant['id']]);
 
     //finally, submit a blank note and confirm that the note shown in the email is blank
-    $event = $this->creatEventWithProfile($event);
-    $event['custom_pre_id'] = $this->ids['UFGroup']['our profile'];
-    $event['note'] = '';
-    $this->submitWithNote($event, $contact_id);
+    $this->submitEventWithNoteInProfile('');
+    $participant = $this->callAPISuccessGetSingle('Participant', []);
+    $this->assertMailSentNotContainingString('This is note');
+    $this->callAPISuccess('Participant', 'delete', ['id' => $participant['id']]);
   }
 
   /**
@@ -497,7 +479,7 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
   public function testSubmitNonPrimaryEmail(): void {
     $event = $this->eventCreateUnpaid();
     $mut = new CiviMailUtils($this, TRUE);
-    $this->submitForm($event['id'], [
+    $this->submitFormLegacy($event['id'], [
       [
         'first_name' => 'k',
         'last_name' => 'p',
@@ -523,19 +505,8 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
           13 => 1,
         ],
         'payment_processor_id' => '1',
-        'bypass_payment' => '',
-        'is_primary' => 1,
-        'is_pay_later' => 0,
-        'campaign_id' => NULL,
-        'defaultRole' => 1,
-        'participant_role_id' => '1',
-        'currencyID' => 'USD',
-        'amount_level' => 'Tiny-tots (ages 5-8) - 1',
-        'amount' => '800.00',
-        'tax_amount' => NULL,
         'year' => '2019',
         'month' => '1',
-        'invoiceID' => '57adc34957a29171948e8643ce906332',
         'button' => '_qf_Register_upload',
         'billing_state_province-5' => 'AP',
         'billing_country-5' => 'US',
@@ -556,11 +527,21 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
    *
    * @param int $eventID
    * @param array $submittedValues Submitted Values
-   *
-   * @noinspection PhpUnhandledExceptionInspection
-   * @noinspection PhpDocMissingThrowsInspection
    */
   protected function submitForm(int $eventID, array $submittedValues): void {
+    $form = $this->getFormWrapper($submittedValues, $eventID);
+    $form->processForm();
+  }
+
+  /**
+   * Submit the confirm form.
+   *
+   * @deprecated use SubmitForm
+   *
+   * @param int $eventID
+   * @param array $submittedValues Submitted Values
+   */
+  protected function submitFormLegacy(int $eventID, array $submittedValues): void {
     $_REQUEST['id'] = $eventID;
     /* @var CRM_Event_Form_Registration_Register $form */
     $form = $this->getFormObject('CRM_Event_Form_Registration_Register', $submittedValues[0] ?? $submittedValues);
@@ -583,7 +564,6 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
    * @param array $submitValues
    */
   protected function submitPaidEvent(array $eventParams = [], array $submitValues = []): void {
-    $mailUtil = new CiviMailUtils($this, TRUE);
     $this->dummyProcessorCreate();
     $event = $this->eventCreatePaid(['payment_processor' => [$this->ids['PaymentProcessor']['dummy_live']], 'confirm_email_text' => '', 'is_pay_later' => FALSE, 'start_date' => '2022-09-16 12:00', 'end_date' => '2022-09-17 12:00'] + $eventParams);
     $this->submitForm($event['id'], array_merge([
@@ -608,7 +588,18 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
       'billing_state_province-5' => 'AP',
       'billing_country-5' => 'US',
     ], $submitValues));
-    $this->sentMail = $mailUtil->getAllMessages();
+  }
+
+  /**
+   * Ensure an email is sent when confirm is disabled for unpaid events.
+   */
+  public function testSubmitUnpaidEventNoConfirm(): void {
+    $this->eventCreateUnpaid(['is_confirm_enabled' => FALSE]);
+    $form = $this->getTestForm('CRM_Event_Form_Registration_Register', [
+      'email-Primary' => 'demo@example.com',
+    ], ['id' => $this->getEventID()]);
+    $form->processForm();
+    $this->assertMailSentContainingStrings(['Event']);
   }
 
   public function testRegistrationWithoutCiviContributeEnabled(): void {
@@ -621,7 +612,7 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
       'registration_end_date' => 20351015,
     ]);
     CRM_Core_BAO_ConfigSetting::disableComponent('CiviContribute');
-    $this->submitForm(
+    $this->submitFormLegacy(
       $event['id'], [
         [
           'first_name' => 'Bruce No Contribute',
@@ -637,11 +628,26 @@ class CRM_Event_Form_Registration_ConfirmTest extends CiviUnitTestCase {
       ]
     );
     $mut->checkMailLog([
-      'Dear Bruce No Contribute,  Thank you for your registration.  This is a confirmation that your registration has been received and your status has been updated to Registered.',
+      'Dear Bruce No Contribute,',
+      'Thank you for your registration.',
+      'This is a confirmation that your registration has been received and your status has been updated to Registered.',
     ]);
     $mut->stop();
     $mut->clearMessages();
     CRM_Core_BAO_ConfigSetting::enableComponent('CiviContribute');
+  }
+
+  /**
+   * @param array $submittedValues
+   * @param int $eventID
+   *
+   * @return \Civi\Test\FormWrapper|\Civi\Test\FormWrappers\EventFormOnline|\Civi\Test\FormWrappers\EventFormParticipant|null
+   */
+  public function getFormWrapper(array $submittedValues, int $eventID) {
+    return $this->getTestForm('CRM_Event_Form_Registration_Register',
+      $submittedValues,
+      ['id' => $eventID])
+      ->addSubsequentForm('CRM_Event_Form_Registration_Confirm');
   }
 
 }

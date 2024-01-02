@@ -45,6 +45,27 @@ class CRM_Event_Form_Registration_Confirm extends CRM_Event_Form_Registration {
    */
   protected $submittableMoneyFields = ['total_amount', 'net_amount', 'non_deductible_amount', 'fee_amount', 'tax_amount', 'amount'];
 
+  private $_amount;
+
+  /**
+   * Provide support for extensions that are used to being able to retrieve _amount
+   *
+   * This property was never declared & is hard to support & a good thing to keep.
+   * However, it makes sense to provide a transitional magic method to get what
+   * it used to provide.
+   *
+   * @param string $name
+   *
+   * @noinspection PhpUnhandledExceptionInspection
+   */
+  public function __get($name) {
+    if ($name === '_amount') {
+      CRM_Core_Error::deprecatedWarning('attempt to access undefined deprecated property _amount');
+      return $this->calculateLegacyAmountArray();
+    }
+    CRM_Core_Error::deprecatedWarning('attempt to access invalid property :' . $name);
+  }
+
   /**
    * Set variables up before form is built.
    */
@@ -327,17 +348,19 @@ class CRM_Event_Form_Registration_Confirm extends CRM_Event_Form_Registration {
         CRM_Utils_System::redirect(CRM_Utils_System::url('civicrm/event/register', "reset=1&id={$form->getEventID()}", FALSE, NULL, FALSE, TRUE));
       }
     }
-    $form->_feeBlock = $form->_values['fee'];
-    CRM_Event_Form_Registration_Register::formatFieldsForOptionFull($form);
+    if ($form->getEventValue('is_monetary')) {
+      $form->_feeBlock = $form->_values['fee'];
+      CRM_Event_Form_Registration_Register::formatFieldsForOptionFull($form);
 
-    if (!empty($form->_priceSetId) &&
-      !$form->_requireApproval && !$form->_allowWaitlist
+      if (!empty($form->_priceSetId) &&
+        !$form->_requireApproval && !$form->_allowWaitlist
       ) {
-      $errors = self::validatePriceSet($form, $form->_params);
-      if (!empty($errors)) {
-        CRM_Core_Session::setStatus(ts('You have been returned to the start of the registration process and any sold out events have been removed from your selections. You will not be able to continue until you review your booking and select different events if you wish.'), ts('Unfortunately some of your options have now sold out for one or more participants.'), 'error');
-        CRM_Core_Session::setStatus(ts('Please note that the options which are marked or selected are sold out for participant being viewed.'), ts('Sold out:'), 'error');
-        CRM_Utils_System::redirect(CRM_Utils_System::url('civicrm/event/register', "_qf_Register_display=true&qfKey={$fields['qfKey']}"));
+        $errors = $form->validatePriceSet($form->_params);
+        if (!empty($errors)) {
+          CRM_Core_Session::setStatus(ts('You have been returned to the start of the registration process and any sold out events have been removed from your selections. You will not be able to continue until you review your booking and select different events if you wish.'), ts('Unfortunately some of your options have now sold out for one or more participants.'), 'error');
+          CRM_Core_Session::setStatus(ts('Please note that the options which are marked or selected are sold out for participant being viewed.'), ts('Sold out:'), 'error');
+          CRM_Utils_System::redirect(CRM_Utils_System::url('civicrm/event/register', "_qf_Register_display=true&qfKey={$fields['qfKey']}"));
+        }
       }
     }
 
@@ -758,6 +781,8 @@ class CRM_Event_Form_Registration_Confirm extends CRM_Event_Form_Registration {
     else {
 
       //build an array of cId/pId of participants
+      // @todo - don't call buildCustomProfile to get additionalParticipants.
+      // CRM_Event_BAO_Participant::getAdditionalParticipantIds is a better fit.
       $additionalIDs = CRM_Event_BAO_Event::buildCustomProfile($registerByID,
         NULL, $primaryContactId, $isTest,
         TRUE
@@ -1289,6 +1314,52 @@ class CRM_Event_Form_Registration_Confirm extends CRM_Event_Form_Registration {
       }
     }
     return [$taxAmount, $participantDetails, $individual, $amountArray];
+  }
+
+  /**
+   * Interim refactoring extraction.
+   *
+   * @internal
+   * @return array
+   */
+  private function calculateLegacyAmountArray(): array {
+    $amountArray = [];
+    foreach ($this->_params as $k => $v) {
+      if ($v === 'skip') {
+        continue;
+      }
+      $append = '';
+      if (is_array($v)) {
+        $this->cleanMoneyFields($v);
+        foreach (['first_name', 'last_name'] as $name) {
+          if (isset($v['billing_' . $name]) &&
+            !isset($v[$name])
+          ) {
+            $v[$name] = $v['billing_' . $name];
+          }
+        }
+
+        if (!empty($v['first_name']) && !empty($v['last_name'])) {
+          $append = $v['first_name'] . ' ' . $v['last_name'];
+        }
+        else {
+          //use an email if we have one
+          foreach ($v as $v_key => $v_val) {
+            if (str_starts_with($v_key, 'email-')) {
+              $append = $v[$v_key];
+            }
+          }
+        }
+
+        $amountArray[$k]['amount'] = $v['amount'];
+        if (!empty($v['discountAmount'])) {
+          $amountArray[$k]['amount'] -= $v['discountAmount'];
+        }
+
+        $amountArray[$k]['label'] = preg_replace('//', '', $v['amount_level']) . '  -  ' . $append;
+      }
+    }
+    return $amountArray;
   }
 
 }

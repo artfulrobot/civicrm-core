@@ -592,53 +592,23 @@ class CRM_Utils_Date {
    * @param string $dateParam
    *   Index of params.
    *
+   * @deprecated since 5.70 will be removed around 5.80.
+   *
+   * At time of deprecation only usages were in CiviHR & CiviProspect in classes that
+   * appeared to be otherwise unmaintained & broken.
+   *
    * @return bool
    */
   public static function convertToDefaultDate(&$params, $dateType, $dateParam) {
+    CRM_Core_Error::deprecatedFunctionWarning('no alternative');
     $now = getdate();
-
     $value = '';
     if (!empty($params[$dateParam])) {
       // suppress hh:mm or hh:mm:ss if it exists CRM-7957
-      $value = preg_replace("/(\s(([01]\d)|[2][0-3])(:([0-5]\d)){1,2})$/", "", $params[$dateParam]);
+      $value = preg_replace(self::getTimeRegex(), "", $params[$dateParam]);
     }
-
-    switch ($dateType) {
-      case self::DATE_yyyy_mm_dd:
-        if (!preg_match('/^\d\d\d\d-?(\d|\d\d)-?(\d|\d\d)$/', $value)) {
-          return FALSE;
-        }
-        break;
-
-      case self::DATE_mm_dd_yy:
-        if (!preg_match('/^(\d|\d\d)[-\/](\d|\d\d)[-\/]\d\d$/', $value)) {
-          return FALSE;
-        }
-        break;
-
-      case self::DATE_mm_dd_yyyy:
-        if (!preg_match('/^(\d|\d\d)[-\/](\d|\d\d)[-\/]\d\d\d\d$/', $value)) {
-          return FALSE;
-        }
-        break;
-
-      case self::DATE_Month_dd_yyyy:
-        if (!preg_match('/^[A-Za-z]*.[ \t]?\d\d\,[ \t]?\d\d\d\d$/', $value)) {
-          return FALSE;
-        }
-        break;
-
-      case self::DATE_dd_mon_yy:
-        if (!preg_match('/^\d\d-[A-Za-z]{3}.*-\d\d$/', $value) && !preg_match('/^\d\d[-\/]\d\d[-\/]\d\d$/', $value)) {
-          return FALSE;
-        }
-        break;
-
-      case self::DATE_dd_mm_yyyy:
-        if (!preg_match('/^(\d|\d\d)[-\/](\d|\d\d)[-\/]\d\d\d\d/', $value)) {
-          return FALSE;
-        }
-        break;
+    if (!self::validateDateInput($params[$dateParam] ?? '', $dateType)) {
+      return FALSE;
     }
 
     if ($dateType === self::DATE_yyyy_mm_dd) {
@@ -766,6 +736,59 @@ class CRM_Utils_Date {
       return TRUE;
     }
     return FALSE;
+  }
+
+  /**
+   * Validate input date against the input type.
+   *
+   * @param string $inputValue
+   * @param int $dateType
+   *
+   * @internal Function signature subject to change without notice.
+   *
+   * @return bool
+   */
+  protected static function validateDateInput(string $inputValue, int $dateType = self::DATE_yyyy_mm_dd): bool {
+    // @todo - return these regex from the same function that returns the values in getAvailableInputFormats()
+    // so they are defined together.
+    // suppress hh:mm or hh:mm:ss if it exists CRM-7957
+    // @todo - fix regex instead.
+    $inputValue = preg_replace(self::getTimeRegex(), "", $inputValue);
+    switch ($dateType) {
+      case self::DATE_yyyy_mm_dd:
+        // 4 numbers separated by - followed by 1-2 numbers, separated by -
+        // followed by 1-2 numbers with optional time string.
+        return preg_match('/^\d\d\d\d-?(\d|\d\d)-?(\d|\d\d)$/', $inputValue);
+
+      case self::DATE_mm_dd_yy:
+        return preg_match('/^(\d|\d\d)[-\/](\d|\d\d)[-\/]\d\d$/', $inputValue);
+
+      case self::DATE_mm_dd_yyyy:
+        return preg_match('/^(\d|\d\d)[-\/](\d|\d\d)[-\/]\d\d\d\d$/', $inputValue);
+
+      case self::DATE_Month_dd_yyyy:
+        $monthRegex = self::getMonthRegex();
+        $regex = '/^' . $monthRegex . ',?\s?(\d|\d\d),?\s]?(\d\d|\d\d\d\d)$/i';
+        return preg_match($regex, $inputValue);
+
+      case self::DATE_dd_mon_yy:
+        return preg_match('/^(\d|\d\d)-' . self::getMonthRegex() . '-\d\d$/i', $inputValue) || preg_match('/^(\d|\d\d)[-\/](\d|\d\d)[-\/]\d\d$/', $inputValue);
+
+      case self::DATE_dd_mm_yyyy:
+        return preg_match('/^(\d|\d\d)[-\/](\d|\d\d)[-\/]\d\d\d\d/', $inputValue);
+    }
+    return FALSE;
+  }
+
+  /**
+   * Get the regex to extract the time portion.
+   *
+   * @internal
+   *
+   * @return string
+   */
+  protected static function getTimeRegex(): string {
+    return "/(\s(([01]*\d)|[2][0-3])(:([0-5]\d)){1,2})$/";
   }
 
   /**
@@ -928,7 +951,7 @@ class CRM_Utils_Date {
    */
   public static function getFromTo($relative, $from = NULL, $to = NULL, $fromTime = NULL, $toTime = '235959') {
     if ($relative) {
-      list($term, $unit) = explode('.', $relative, 2);
+      [$term, $unit] = explode('.', $relative, 2);
       $dateRange = self::relativeToAbsolute($term, $unit);
       $from = substr(($dateRange['from'] ?? ''), 0, 8);
       $to = substr(($dateRange['to'] ?? ''), 0, 8);
@@ -1076,17 +1099,17 @@ class CRM_Utils_Date {
   /**
    * Get the smarty view presentation mapping for the given format.
    *
-   * Historically it was decided that where the view format is 'dd/mm/yy' or 'mm/dd/yy'
-   * they should be rendered using a longer date format. This is likely as much to
-   * do with the earlier date widget being unable to handle some formats as usablity.
-   * However, we continue to respect this.
+   * Historically it was decided that where the view format is 'dd/mm/yy' or
+   * 'mm/dd/yy' they should be rendered using a longer date format. This is
+   * likely as much to do with the earlier date widget being unable to handle
+   * some formats as usablity. However, we continue to respect this.
    *
    * @param $format
    *   Given format ( eg 'M Y', 'Y M' ).
    *
    * @return string|null
-   *   Smarty translation of the date format. Null is also valid and is translated
-   *   according to the available parts at the smarty layer.
+   *   Smarty translation of the date format. Null is also valid and is
+   *   translated according to the available parts at the smarty layer.
    */
   public static function getDateFieldViewFormat($format) {
     $supportableFormats = [
@@ -2173,43 +2196,51 @@ class CRM_Utils_Date {
    *
    * @return null|string
    */
-  public static function formatDate($date, int $dateType = self::DATE_yyyy_mm_dd) {
-    if (empty($date)) {
+  public static function formatDate($date, int $dateType = self::DATE_yyyy_mm_dd): ?string {
+    // This empty check is never hit in practice - hence it is ok to treat it the same as bad data.
+    if (empty($date) || !self::validateDateInput($date, $dateType)) {
       return NULL;
     }
-
-    // 1. first convert date to default format.
-    // 2. append time to default formatted date (might be removed during format)
-    // 3. validate date / date time.
-    // 4. If date and time then convert to default date time format.
-
-    $dateKey = 'date';
-    $dateParams = [$dateKey => $date];
-
-    if (CRM_Utils_Date::convertToDefaultDate($dateParams, $dateType, $dateKey)) {
-      $dateVal = $dateParams[$dateKey];
-      if ($dateType === self::DATE_yyyy_mm_dd) {
-        $matches = [];
-        // The seconds part of this regex is not quite right - but it does succeed
-        // in clarifying whether there is a time component or not - which is all it is meant
-        // to do.
-        if (preg_match('/(\s(([01]\d)|[2][0-3]):([0-5]\d):?[0-5]?\d?)$/', $date, $matches)) {
-          if (strpos($date, '-') !== FALSE) {
-            $dateVal .= array_shift($matches);
-          }
-          if (!CRM_Utils_Rule::dateTime($dateVal)) {
-            return NULL;
-          }
-          $dateVal = CRM_Utils_Date::customFormat(preg_replace("/(:|\s)?/", '', $dateVal), '%Y%m%d%H%i%s');
-          return $dateVal;
-        }
-      }
-
-      // validate date.
-      return CRM_Utils_Rule::date($dateVal) ? $dateVal : NULL;
+    // Test cover for this function is in CRM_Utils_DateTest::testFormatDate().
+    // This function does some special handling for month translations and
+    // for 2 digit years outside normal strtotime. It might be possible to migrate
+    // to other multilingual php date handling - which is why the recent focus has been on adding
+    // tests.
+    // Note that the replaceShortYear & replaceTextMonth functions would work
+    // on other date formats - eg. self::DATE_mm_dd_yy - it is only the
+    // validation function that is block ing. There is some question as to how
+    // useful it is to require the user to specify the date format to the extent we
+    // do - as 2 digit year vs 4 digit can be figured out...
+    if ($dateType === self::DATE_mm_dd_yy || $dateType === self::DATE_mm_dd_yyyy) {
+      // PHP interprets slashes as American and dots/dashes as European/other.
+      // The only thing we support for mm_dd_yy that differs from strtotime is
+      // the use of dashes - so here we replace then we can use strtotime.
+      $date = str_replace('-', '/', $date);
+      $date = self::replaceShortYear($date, '/', 3);
+    }
+    if ($dateType === self::DATE_dd_mon_yy || $dateType === self::DATE_dd_mm_yyyy) {
+      // PHP interprets slashes as American and dashes as European/other
+      // We swap any slashes to dashes so strtotime will handle.
+      $date = str_replace('/', '-', $date);
+      $date = self::replaceTextMonth($date, '-', 2);
+      $date = self::replaceShortYear($date, '-', 3);
     }
 
-    return NULL;
+    if ($dateType === self::DATE_Month_dd_yyyy) {
+      $timeMatches = [];
+      preg_match(self::getTimeRegex(), $date, $timeMatches);
+      $timePortion = $timeMatches[0] ?? '';
+      $datePortion = str_replace($timePortion, '', $date);
+      // Replace whitespace in the date portion of the string with '/' for strtotime to handle
+      // as US-ordered values. We strip off & re-add the time portion
+      // so that part is not changed (ie a space continues to separate the date & time).
+      $date = preg_replace('/(,|\s)+/', '/', $datePortion) . $timePortion;
+      $date = self::replaceTextMonth($date, '/', 1);
+      $date = self::replaceShortYear($date, '/', 3);
+    }
+
+    $timestamp = strtotime($date);
+    return $timestamp ? date('YmdHis', $timestamp) : NULL;
   }
 
   /**
@@ -2328,6 +2359,141 @@ class CRM_Utils_Date {
     }
 
     return TRUE;
+  }
+
+  /**
+   * Get the 2-digit numeric month from the input variable.
+   *
+   * Month names & abbreviations are checked in a translation-sensitive manner.
+   *
+   * @param string $string
+   *
+   * @return string|bool
+   *
+   * @internal
+   */
+  protected static function getNumericMonth(string $string) {
+    if (is_numeric($string)) {
+      return $string;
+    }
+    $string = strtolower(trim($string, "., \n\r\t\v\0"));
+    foreach (self::getFullMonthNames() as $monthNumeric => $monthName) {
+      if ($string === mb_strtolower($monthName)) {
+        return str_pad($monthNumeric, 2, 0, STR_PAD_LEFT);
+      }
+    }
+    foreach (self::getAbbrMonthNames() as $monthNumeric => $monthAbbreviation) {
+      if ($string === mb_strtolower($monthAbbreviation)) {
+        return str_pad($monthNumeric, 2, 0, STR_PAD_LEFT);
+      }
+    }
+    return FALSE;
+  }
+
+  /**
+   * Get the date element from the passed date string.
+   *
+   * @param string $date e.g. '20-Oct-2022'
+   * @param string $separator e.g '-'
+   * @param int $monthPlacement eg. 2 for the second section of the string
+   *
+   * @internal
+   *
+   * @return string
+   */
+  protected static function getDateElement(string $date, string $separator, int $monthPlacement): string {
+    $element = explode($separator, $date)[$monthPlacement - 1];
+    // This second explosion drops any trailing time string.
+    return explode(' ', $element)[0];
+  }
+
+  /**
+   * @param $date
+   * @param string $separator
+   * @param int $monthPlacement
+   *
+   * @internal
+   *
+   * @return float|int|mixed|string
+   */
+  protected static function replaceTextMonth($date, string $separator, int $monthPlacement) {
+    $month = self::getDateElement($date, $separator, $monthPlacement);
+    if (!is_numeric($month)) {
+      return str_replace($month, self::getNumericMonth($month), $date);
+    }
+    return $date;
+  }
+
+  /**
+   * Replace a year in the short year format e.g 22.
+   *
+   * Note this differs from standard php strotime as we treat anything less
+   * than 5 years in the future as being in the past.
+   *
+   * The reasons for this are not documented but it is likely that our use cases
+   * dictated it - eg. importing birth dates would more sanely default to handling 68
+   * as 1968. By contrast importing future data is likely rare.
+   *
+   * @param string $date
+   * @param string $separator
+   * @param int $yearPlacement
+   *
+   * @internal
+   *
+   * @return string
+   */
+  protected static function replaceShortYear($date, string $separator, int $yearPlacement): string {
+    $year = self::getDateElement($date, $separator, $yearPlacement);
+    if (strlen($year) === 4) {
+      return $date;
+    }
+    $parts = explode($separator, $date);
+    // Replace the year with the 4-digit-year, re-appending any trailing time string.
+    $parts[$yearPlacement - 1] = self::getYear($year) . substr($parts[$yearPlacement - 1], 2);
+    return implode($separator, $parts);
+  }
+
+  /**
+   * Get a 4 digit year from a 2 or 4 digit year.
+   *
+   * The handling differs from strtotime as a year more than 5 years in the future
+   * is deemed to be in the past whereas strtotime uses a 1970 cutoff
+   * https://www.w3schools.com/php/func_date_strtotime.asp
+   *
+   * @param int $year
+   *
+   * @internal
+   *
+   * @return int
+   */
+  protected static function getYear(int $year) {
+    $currentYear = date('Y');
+    if ($year < 100) {
+      $year = ((int) substr($currentYear, 0, 2)) * 100 + $year;
+      if ($year > ($currentYear + 5)) {
+        $year -= 100;
+      }
+      elseif ($year <= ($currentYear - 95)) {
+        $year += 100;
+      }
+    }
+    return $year;
+  }
+
+  /**
+   * Get the regex to find a locale-relevant date in the string.
+   *
+   * Resulting regex looks like this, in English locale
+   * /^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec),?\s?\d\d,?\s]?\d\d\d\d$/
+   *
+   *
+   * @return string
+   * @internal
+   *
+   */
+  protected static function getMonthRegex(): string {
+    $months = array_merge(self::getFullMonthNames(), self::getAbbrMonthNames());
+    return '(' . implode('|', $months) . ')';
   }
 
 }

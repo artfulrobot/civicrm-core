@@ -9,6 +9,8 @@
  +--------------------------------------------------------------------+
  */
 
+use Civi\Core\Event\PreEvent;
+
 /**
  *
  * @package CRM
@@ -44,18 +46,15 @@ class CRM_Report_BAO_ReportInstance extends CRM_Report_DAO_ReportInstance implem
   }
 
   /**
-   * Create instance.
+   * Create report instance.
    *
-   * takes an associative array and creates a instance object and does any related work like permissioning, adding to dashboard etc.
-   *
-   * This function is invoked from within the web form layer and also from the api layer
+   * Does any related work like creating navigation, adding to dashboard etc.
    *
    * @param array $params
-   *   (reference ) an assoc array of name/value pairs.
    *
    * @return CRM_Report_DAO_ReportInstance
    */
-  public static function &create(&$params) {
+  public static function create(array $params) {
     // Transform nonstandard field names used by quickform
     $params['id'] ??= ($params['instance_id'] ?? NULL);
     if (isset($params['report_header'])) {
@@ -112,10 +111,6 @@ class CRM_Report_BAO_ReportInstance extends CRM_Report_DAO_ReportInstance implem
     $transaction = new CRM_Core_Transaction();
 
     $instance = self::add($params);
-    if (is_a($instance, 'CRM_Core_Error')) {
-      $transaction->rollback();
-      return $instance;
-    }
 
     // add / update navigation as required
     if (!empty($navigationParams)) {
@@ -177,9 +172,12 @@ class CRM_Report_BAO_ReportInstance extends CRM_Report_DAO_ReportInstance implem
 
   /**
    * Event fired prior to modifying a ReportInstance.
+   *
    * @param \Civi\Core\Event\PreEvent $event
+   *
+   * @throws \CRM_Core_Exception
    */
-  public static function self_hook_civicrm_pre(\Civi\Core\Event\PreEvent $event) {
+  public static function self_hook_civicrm_pre(PreEvent $event): void {
     if ($event->action === 'delete' && $event->id) {
       // When deleting a report, also delete from navigation menu
       $navId = CRM_Core_DAO::getFieldValue('CRM_Report_DAO_ReportInstance', $event->id, 'navigation_id');
@@ -260,7 +258,7 @@ class CRM_Report_BAO_ReportInstance extends CRM_Report_DAO_ReportInstance implem
    *   Url to redirect the browser to on fail.
    * @param string $successRedirect
    */
-  public static function doFormDelete($instanceId, $bounceTo = 'civicrm/report/list?reset=1', $successRedirect = NULL) {
+  public static function doFormDelete($instanceId, $bounceTo = 'civicrm/report/list?reset=1', $successRedirect = NULL): void {
     if (!CRM_Core_Permission::check('administer Reports')) {
       $statusMessage = ts('You do not have permission to Delete Report.');
       CRM_Core_Error::statusBounce($statusMessage, $bounceTo);
@@ -272,6 +270,34 @@ class CRM_Report_BAO_ReportInstance extends CRM_Report_DAO_ReportInstance implem
     if ($successRedirect) {
       CRM_Utils_System::redirect(CRM_Utils_System::url($successRedirect));
     }
+  }
+
+  /**
+   * Apply permission field check to ReportInstance.
+   *
+   * Note that we just check all the individual found permissions & then use the
+   * 'OK' ones as a filter. The volume should be low enough for this to be OK
+   * and the table holds exactly one permission for each instance.
+   *
+   * @param string|null $entityName
+   * @param int|null $userId
+   * @param array $conditions
+   *
+   * @inheritDoc
+   */
+  public function addSelectWhereClause(string $entityName = NULL, int $userId = NULL, array $conditions = []): array {
+    $permissions = CRM_Core_DAO::executeQuery('SELECT DISTINCT permission FROM civicrm_report_instance');
+    $validPermissions = [];
+    while ($permissions->fetch()) {
+      $permission = $permissions->permission;
+      if ($permission && CRM_Core_Permission::check($permission)) {
+        $validPermissions[] = $permission;
+      }
+    }
+    if (!$validPermissions) {
+      return ['permission' => ['IS NULL']];
+    }
+    return ['permission' => ['IN ("' . implode('", "', $validPermissions) . '")']];
   }
 
   /**
@@ -289,7 +315,7 @@ class CRM_Report_BAO_ReportInstance extends CRM_Report_DAO_ReportInstance implem
    *    wrong, but at the php level it worked https://github.com/civicrm/civicrm-core/pull/8529#issuecomment-227639091
    *  - general script-add.
    */
-  public static function getActionMetadata() {
+  public static function getActionMetadata(): array {
     $actions = [];
     if (CRM_Core_Permission::check('save Report Criteria')) {
       $actions['report_instance.save'] = ['title' => ts('Save')];

@@ -71,7 +71,7 @@ class SpecFormatter {
       $field->setLabel($data['html']['label'] ?? NULL);
       $field->setLocalizable($data['localizable'] ?? FALSE);
       if (!empty($data['DFKEntities'])) {
-        $field->setDfkEntities(array_values($data['DFKEntities']));
+        $field->setDfkEntities($data['DFKEntities']);
       }
       if (!empty($data['pseudoconstant'])) {
         // Do not load options if 'prefetch' is disabled
@@ -116,6 +116,9 @@ class SpecFormatter {
     // For pseudo-fk fields like `civicrm_group.parents`
     elseif (($data['html']['type'] ?? NULL) === 'EntityRef' && !empty($data['pseudoconstant']['table'])) {
       $field->setFkEntity(CoreUtil::getApiNameFromTableName($data['pseudoconstant']['table']));
+    }
+    if (!empty($data['FKColumnName'])) {
+      $field->setFkColumn($data['FKColumnName']);
     }
 
     return $field;

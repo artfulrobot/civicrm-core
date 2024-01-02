@@ -221,6 +221,7 @@ class CRM_Event_Form_Registration_AdditionalParticipant extends CRM_Event_Form_R
     if ($this->_values['event']['is_monetary']) {
       CRM_Event_Form_Registration_Register::buildAmount($this, TRUE, NULL, $this->_priceSetId);
     }
+    $this->assign('priceSet', $this->_priceSet);
 
     //Add pre and post profiles on the form.
     foreach (['pre', 'post'] as $keys) {
@@ -501,7 +502,7 @@ class CRM_Event_Form_Registration_AdditionalParticipant extends CRM_Event_Form_R
         $totalParticipants = self::getParticipantCount($self, $allParticipantParams);
 
         //validate price field params.
-        $priceSetErrors = self::validatePriceSet($self, $allParticipantParams);
+        $priceSetErrors = $self->validatePriceSet($allParticipantParams);
         $errors = array_merge($errors, CRM_Utils_Array::value($addParticipantNum, $priceSetErrors, []));
 
         if (!$self->_allowConfirmation &&

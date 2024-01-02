@@ -455,7 +455,7 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
       //@todo we are blocking for multiple registrations because we haven't tested
       $this->addCIDZeroOptions();
     }
-
+    $this->assign('priceSet', $this->_priceSet);
     $this->addElement('hidden', 'bypass_payment', NULL, ['id' => 'bypass_payment']);
     $this->assign('bypassPayment', $bypassPayment);
 
@@ -600,8 +600,6 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
       $required = FALSE;
     }
 
-    $className = CRM_Utils_System::getClassName($form);
-
     //build the priceset fields.
     if ($priceSetID) {
 
@@ -616,26 +614,24 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
 
       foreach ($form->_feeBlock as $field) {
         // public AND admin visibility fields are included for back-office registration and back-office change selections
-        if (($field['visibility'] ?? NULL) == 'public' ||
-          (($field['visibility'] ?? NULL) == 'admin' && $adminFieldVisible == TRUE) ||
-          $className == 'CRM_Event_Form_ParticipantFeeSelection'
+        if (($field['visibility'] ?? NULL) === 'public' ||
+          (($field['visibility'] ?? NULL) === 'admin' && $adminFieldVisible == TRUE)
         ) {
           $fieldId = $field['id'];
           $elementName = 'price_' . $fieldId;
 
           $isRequire = $field['is_required'] ?? NULL;
-          if ($button == 'skip') {
+          if ($button === 'skip') {
             $isRequire = FALSE;
           }
 
           //user might modified w/ hook.
           $options = $field['options'] ?? NULL;
-          $formClasses = ['CRM_Event_Form_ParticipantFeeSelection'];
 
           if (!is_array($options)) {
             continue;
           }
-          elseif ($hideAdminValues && !in_array($className, $formClasses)) {
+          if ($hideAdminValues) {
             $publicVisibilityID = CRM_Price_BAO_PriceField::getVisibilityOptionID('public');
             $adminVisibilityID = CRM_Price_BAO_PriceField::getVisibilityOptionID('admin');
 
@@ -668,7 +664,6 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
         }
       }
       $form->_priceSet['id'] ??= $priceSetID;
-      $form->assign('priceSet', $form->_priceSet);
     }
     else {
       // Is this reachable?
@@ -733,12 +728,10 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
       }
     }
 
-    $className = CRM_Utils_System::getClassName($form);
-
     //get the current price event price set options count.
     $currentOptionsCount = self::getPriceSetOptionCount($form);
     $recordedOptionsCount = CRM_Event_BAO_Participant::priceSetOptionsCount($form->_eventId, $skipParticipants);
-    $optionFullTotalAmount = 0;
+
     $currentParticipantNo = (int) substr($form->_name, 12);
     foreach ($form->_feeBlock as & $field) {
       $optionFullIds = [];
@@ -761,12 +754,7 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
         ) {
           $isFull = TRUE;
           $optionFullIds[$optId] = $optId;
-          if ($field['html_type'] != 'Select') {
-            if (in_array($optId, $defaultPricefieldIds)) {
-              $optionFullTotalAmount += $option['amount'] ?? 0;
-            }
-          }
-          else {
+          if ($field['html_type'] === 'Select') {
             if (!empty($defaultPricefieldIds) && in_array($optId, $defaultPricefieldIds)) {
               unset($optionFullIds[$optId]);
             }
@@ -786,13 +774,11 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
         }
         $option['is_full'] = $isFull;
         $option['db_total_count'] = $dbTotalCount;
-        $option['total_option_count'] = $dbTotalCount + $currentTotalCount;
       }
 
       //finally get option ids in.
       $field['option_full_ids'] = $optionFullIds;
     }
-    $form->assign('optionFullTotalAmount', $optionFullTotalAmount);
   }
 
   /**
@@ -855,7 +841,7 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
       //format params.
       $formatted = self::formatPriceSetParams($form, $fields);
       $ppParams = [$formatted];
-      $priceSetErrors = self::validatePriceSet($form, $ppParams);
+      $priceSetErrors = $form->validatePriceSet($ppParams);
       $primaryParticipantCount = self::getParticipantCount($form, $ppParams);
 
       //get price set fields errors in.

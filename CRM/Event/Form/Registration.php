@@ -250,13 +250,6 @@ class CRM_Event_Form_Registration extends CRM_Core_Form {
 
       // check for is_monetary status
       $isMonetary = $this->getEventValue('is_monetary');
-      // check for ability to add contributions of type
-      if ($isMonetary
-        && CRM_Financial_BAO_FinancialType::isACLFinancialTypeStatus()
-        && !CRM_Core_Permission::check('add contributions of type ' . CRM_Contribute_PseudoConstant::financialType($this->_values['event']['financial_type_id']))
-      ) {
-        CRM_Core_Error::statusBounce(ts('You do not have permission to access this page.'));
-      }
 
       $this->checkValidEvent();
       // get the participant values, CRM-4320
@@ -1239,22 +1232,17 @@ class CRM_Event_Form_Registration extends CRM_Core_Form {
    *
    * User should select at least one price field option.
    *
-   * @param CRM_Core_Form $form
    * @param array $params
    *
    * @return array
    */
-  public static function validatePriceSet(&$form, $params) {
+  protected function validatePriceSet($params) {
     $errors = [];
     $hasOptMaxValue = FALSE;
     if (!is_array($params) || empty($params)) {
       return $errors;
     }
-
-    $currentParticipantNum = substr($form->_name, 12);
-    if (!$currentParticipantNum) {
-      $currentParticipantNum = 0;
-    }
+    $form = $this;
 
     $priceSetId = $form->get('priceSetId');
     $priceSetDetails = $form->get('priceSet');
@@ -1580,7 +1568,7 @@ class CRM_Event_Form_Registration extends CRM_Core_Form {
       $this->set('participantInfo', $participantInfo);
     }
 
-    if ($this->getPaymentProcessorObject()->supports('noReturn')
+    if (!$this->getEventValue('is_monetary') || $this->getPaymentProcessorObject()->supports('noReturn')
     ) {
       // Send mail Confirmation/Receipt.
       $this->sendMails($params, $registerByID, $participantCount);
@@ -1609,6 +1597,8 @@ class CRM_Event_Form_Registration extends CRM_Core_Form {
     $primaryContactId = $this->get('primaryContactId');
 
     //build an array of custom profile and assigning it to template.
+    // @todo - don't call buildCustomProfile to get additionalParticipants.
+    // CRM_Event_BAO_Participant::getAdditionalParticipantIds is a better fit.
     $additionalIDs = CRM_Event_BAO_Event::buildCustomProfile($registerByID, NULL,
       $primaryContactId, $isTest, TRUE
     );

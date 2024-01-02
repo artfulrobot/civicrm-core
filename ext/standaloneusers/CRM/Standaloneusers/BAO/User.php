@@ -74,19 +74,37 @@ class CRM_Standaloneusers_BAO_User extends CRM_Standaloneusers_DAO_User implemen
   }
 
   /**
+   * Check (write) access permission
+   *
+   * @param string $entityName
+   * @param string $action
+   * @param array $record
+   * @param integer|null $userID
+   * @return boolean
    * @see \Civi\Api4\Utils\CoreUtil::checkAccessRecord
    */
-  public static function self_civi_api4_authorizeRecord(AuthorizeRecordEvent $e): void {
-    $record = $e->getRecord();
-    $action = $e->getActionName();
-    // Prevent users from deleting their own user account
-    if (in_array($action, ['delete'], TRUE)) {
-      $sess = CRM_Core_Session::singleton();
-      $ufID = (int) $sess->get('ufID');
-      if ($record['id'] == $ufID) {
-        $e->setAuthorized(FALSE);
-      };
+  public static function _checkAccess(string $entityName, string $action, array $record, ?int $userID): bool {
+    $mayAdminUsers = \CRM_Core_Permission::check('cms:administer users');
+    $isOwnUser = ((int) \CRM_Utils_System::getLoggedInUfID()) == $record['id'] ?? NULL;
+    if ($action === 'delete') {
+      if ($isOwnUser) {
+        // Prevent users from deleting their own user account
+        return FALSE;
+      }
+      else {
+        // Enforce administer user permission requirement
+        return $mayAdminUsers;
+      }
     }
+    elseif ($action === 'update') {
+      return $isOwnUser ?: $mayAdminUsers;
+    }
+    elseif ($action === 'create') {
+      return $mayAdminUsers;
+    }
+
+    // Is there another write action we don't know about? If so, play it safe and say No.
+    return FALSE;
   }
 
 }

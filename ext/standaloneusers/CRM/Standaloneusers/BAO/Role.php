@@ -19,6 +19,13 @@ class CRM_Standaloneusers_BAO_Role extends CRM_Standaloneusers_DAO_Role implemen
   }
 
   /**
+   * Check access permission
+   *
+   * @param string $entityName
+   * @param string $action
+   * @param array $record
+   * @param integer|null $userID
+   * @return boolean
    * @see \Civi\Api4\Utils\CoreUtil::checkAccessRecord
    */
   public static function self_civi_api4_authorizeRecord(AuthorizeRecordEvent $e): void {

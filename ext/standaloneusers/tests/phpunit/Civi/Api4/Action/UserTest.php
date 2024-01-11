@@ -356,6 +356,7 @@ class UserTest extends \PHPUnit\Framework\TestCase implements EndToEndInterface,
    */
   public function testPermissionedPasswordChangingAsAdmin() {
     $this->loginUser($this->adminUserID);
+    $this->assertTrue(\CRM_Core_Permission::check('cms:administer users'));
 
     // Check we are allowed to update another user's password if we provide our own,
     // since we have 'cms:administer users'
@@ -364,7 +365,7 @@ class UserTest extends \PHPUnit\Framework\TestCase implements EndToEndInterface,
     $previousHash = $nonAdminUser['hashed_password'];
     $updatedUser = User::update(TRUE)
       ->addValue('password', 'topSecret')
-      ->addWhere('id', '=', $nonAdminUser['id'])
+      ->addWhere('id', '=', $this->nonAdminUserID)
       ->setActorPassword('secret1')
       ->setReload(TRUE)
       ->execute()->first();

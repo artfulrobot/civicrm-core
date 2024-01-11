@@ -30,7 +30,7 @@ class Update extends DAOUpdateAction {
           }
         }
         if (!$found) {
-          throw new UnauthorizedException("User.update called without a where clause limiting to logged-in user.");
+          throw new UnauthorizedException("User.update called without 'cms:administer users' permission and without a where clause limiting to logged-in user.");
         }
       }
     }

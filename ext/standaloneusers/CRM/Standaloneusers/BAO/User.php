@@ -4,13 +4,14 @@
  * @copyright CiviCRM LLC https://civicrm.org/licensing
  */
 
+use Civi\Api4\Event\AuthorizeRecordEvent;
 use Civi\Api4\UserRole;
-use CRM_Standaloneusers_ExtensionUtil as E;
+use Civi\Core\HookInterface;
 
 /**
  * Business access object for the User entity.
  */
-class CRM_Standaloneusers_BAO_User extends CRM_Standaloneusers_DAO_User implements \Civi\Core\HookInterface {
+class CRM_Standaloneusers_BAO_User extends CRM_Standaloneusers_DAO_User implements HookInterface {
 
   /**
    * Event fired before an action is taken on a User record.
@@ -74,37 +75,33 @@ class CRM_Standaloneusers_BAO_User extends CRM_Standaloneusers_DAO_User implemen
   }
 
   /**
-   * Check (write) access permission
-   *
-   * @param string $entityName
-   * @param string $action
-   * @param array $record
-   * @param integer|null $userID
-   * @return boolean
    * @see \Civi\Api4\Utils\CoreUtil::checkAccessRecord
    */
-  public static function _checkAccess(string $entityName, string $action, array $record, ?int $userID): bool {
+  public static function self_civi_api4_authorizeRecord(AuthorizeRecordEvent $e): void {
+    $record = $e->getRecord();
+    $action = $e->getActionName();
     $mayAdminUsers = \CRM_Core_Permission::check('cms:administer users');
     $isOwnUser = ((int) \CRM_Utils_System::getLoggedInUfID()) == $record['id'] ?? NULL;
     if ($action === 'delete') {
       if ($isOwnUser) {
         // Prevent users from deleting their own user account
-        return FALSE;
+        $e->setAuthorized(FALSE);
       }
       else {
         // Enforce administer user permission requirement
-        return $mayAdminUsers;
+        $e->setAuthorized($mayAdminUsers);
       }
     }
     elseif ($action === 'update') {
-      return $isOwnUser ?: $mayAdminUsers;
+      $e->setAuthorized($isOwnUser ?: $mayAdminUsers);
     }
     elseif ($action === 'create') {
-      return $mayAdminUsers;
+      $e->setAuthorized($mayAdminUsers);
     }
-
-    // Is there another write action we don't know about? If so, play it safe and say No.
-    return FALSE;
+    else {
+      // Is there another write action we don't know about? If so, play it safe and say No.
+      $e->setAuthorized(FALSE);
+    }
   }
 
 }

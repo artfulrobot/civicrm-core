@@ -244,6 +244,18 @@ class CRM_Core_Session {
   }
 
   /**
+   * Unset an item in the session.
+   */
+  public function unset(string $name, $prefix = NULL) {
+    if (empty($prefix)) {
+      unset($this->_session[$this->_key][$name]);
+    }
+    else {
+      unset($this->_session[$this->_key][$prefix][$name]);
+    }
+  }
+
+  /**
    * Gets the value of the named variable in the session scope.
    *
    * This function takes a name and retrieves the value of this

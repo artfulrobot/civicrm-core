@@ -26,7 +26,9 @@ class Standalone implements AuthxInterface {
    * @inheritDoc
    */
   public function loginSession($userId) {
-    \session_regenerate_id(FALSE);
+    if (session_status() === \PHP_SESSION_ACTIVE) {
+      \session_regenerate_id(FALSE);
+    }
 
     $this->loginStateless($userId);
 
